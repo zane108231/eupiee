@@ -1,0 +1,225 @@
+const { MessageFlags } = require("discord.js");
+const { getGuildData } = require("../utils/mongoGuildData");
+const {
+    createChatPlayLoadingContainer,
+    createCouldNotPlayEmbed,
+} = require("../utils/components");
+const { startIfIdle, ensurePlayer, getOccupiedVoiceChannel, buildNoBotsAvailablePayload } = require("../utils/playback");
+const {
+    createNotInVoiceChannelEmbed,
+    canUseMusicAction,
+    denyMusicMessage,
+} = require("../utils/permissions");
+
+async function sendChatPlayFeedback(channel, content, timeoutMs = 5000) {
+    try {
+        const payload = typeof content === "string" ? { content } : content;
+        const feedback = await channel.send(payload);
+        setTimeout(() => feedback.delete().catch(() => {}), timeoutMs);
+    } catch (error) {
+        console.error("[euphire] Failed to send ChatPlay feedback:", error.message);
+    }
+}
+
+/**
+ * Handle ChatPlay messages
+ * - Deletes user's message
+ * - Resolves the song
+ * - Plays in user's VC
+ * - Edits the persistent ChatPlay message (never sends a new one)
+ */
+async function handleChatPlayMessage(client, message) {
+    const guildData = getGuildData(message.guild.id);
+
+    // Only handle messages in the ChatPlay channel when enabled
+    if (!guildData.chatPlayChannelId || message.channel.id !== guildData.chatPlayChannelId) {
+        return false;
+    }
+
+    // Check if ChatPlay is enabled
+    if (!guildData.chatPlayEnabled) return false;
+
+    // Ignore bot messages
+    if (message.author.bot) return false;
+
+    const query = message.content.trim();
+    if (!query) return false;
+
+    if (/(?:youtube\.com|youtu\.be)/i.test(query)) {
+        try {
+            await message.delete();
+            const warn = await message.channel.send({
+                content: "❌ YouTube links are currently not supported.",
+            });
+            setTimeout(() => warn.delete().catch(() => {}), 5000);
+        } catch (err) {}
+        return true;
+    }
+
+    // Delete the user's message immediately
+    try {
+        await message.delete();
+    } catch (err) {
+        console.error("[euphire ChatPlay] Failed to delete message:", err.message);
+    }
+
+    const voiceChannel = message.member?.voice?.channel;
+    if (!voiceChannel) {
+        try {
+            const warn = await message.channel.send({
+                embeds: [createNotInVoiceChannelEmbed()],
+            });
+            setTimeout(() => warn.delete().catch(() => {}), 5000);
+        } catch (err) {
+            // Can't send in channel — ignore
+        }
+        return true;
+    }
+
+    const occupied = getOccupiedVoiceChannel(message.guild, client);
+    if (occupied && occupied.id !== voiceChannel.id) {
+        try {
+            await message.channel.send(buildNoBotsAvailablePayload());
+        } catch (error) {
+            console.error(
+                `[euphire] Failed to send the no-bots-available message in channel ${message.channel.id}:`,
+                error.message
+            );
+        }
+        return true;
+    }
+
+    try {
+        let player = await ensurePlayer(client, {
+            guildId: message.guild.id,
+            voiceChannelId: voiceChannel.id,
+            voiceChannelObject: voiceChannel,
+            textChannelId: message.channel.id,
+            volume: guildData.volume,
+            requesterId: message.author.id,
+        });
+
+        // Update ChatPlay message to show loading state (only for first song)
+        if (!player.playing && !player.paused && !player.current) {
+            try {
+                const loadingContainer = createChatPlayLoadingContainer();
+                const channel = client.channels.cache.get(guildData.chatPlayChannelId);
+                if (channel && guildData.chatPlayMessageId) {
+                    const msg = await channel.messages.fetch(guildData.chatPlayMessageId);
+                    await msg.edit({
+                        components: [loadingContainer],
+                        flags: MessageFlags.IsComponentsV2,
+                    });
+                }
+            } catch (err) {
+                // Ignore if message edit fails
+            }
+        }
+
+        // Resolve the query
+        const result = await client.riffy.resolve({
+            query: query.trim(),
+            source: "spsearch",
+            strictSource: true,
+            requester: message.author,
+        });
+
+        const { loadType, tracks, playlistInfo } = result;
+
+        const requiredPermission =
+            loadType === "playlist" ||
+            loadType === "playlist_loaded" ||
+            loadType === "PLAYLIST_LOADED"
+                ? "add playlist"
+                : ["search", "track", "SEARCH_RESULT", "TRACK_LOADED"].includes(loadType)
+                    ? "add track"
+                    : null;
+        if (
+            requiredPermission &&
+            !(await canUseMusicAction(message.member, player, requiredPermission))
+        ) {
+            await sendChatPlayFeedback(
+                message.channel,
+                denyMusicMessage(message.guild.id, requiredPermission)
+            );
+            return true;
+        }
+
+
+
+        // Handle all loadType variants (v3 + v4)
+        if (
+            loadType === "playlist" ||
+            loadType === "PLAYLIST_LOADED"
+        ) {
+            const addedTracks = [];
+            
+            for (const track of tracks) {
+                track.info.requester = message.author;
+                player.queue.add(track);
+                addedTracks.push(track.info.title || "Unknown");
+            }
+            
+            // Send feedback for playlist
+            try {
+                const playlistName = playlistInfo?.name || "Playlist";
+                const feedbackMsg = `✅ Added **${addedTracks.length}** of **${tracks.length}** tracks from **${playlistName}**!`;
+                await sendChatPlayFeedback(message.channel, feedbackMsg);
+            } catch (err) {}
+            await startIfIdle(player);
+        } else if (
+            loadType === "search" ||
+            loadType === "track" ||
+            loadType === "SEARCH_RESULT" ||
+            loadType === "TRACK_LOADED"
+        ) {
+            let track = tracks[0];
+            if (!track) {
+                await sendChatPlayFeedback(message.channel, "❌ No results found for that search.");
+                return true;
+            }
+
+            const spotifyTrack = track;
+            track = await require("../utils/search").resolveSpotifyTrackAudio(
+                client.riffy,
+                track,
+                message.author
+            );
+            if (!track) {
+                await sendChatPlayFeedback(
+                    message.channel,
+                    { embeds: [createCouldNotPlayEmbed(spotifyTrack)] }
+                );
+                return true;
+            }
+            
+            track.info.requester = message.author;
+            player.queue.add(track);
+            // Send feedback for single track
+            try {
+                const feedback = await message.channel.send({
+                    content: `✅ Added **${track.info.title}** to queue!`
+                });
+                setTimeout(() => feedback.delete().catch(() => {}), 3000);
+            } catch (err) {}
+            await startIfIdle(player);
+        } else if (loadType === "empty" || loadType === "EMPTY" || loadType === "NO_MATCHES") {
+            await sendChatPlayFeedback(message.channel, "❌ No results found for that search.");
+        } else {
+            console.log(`[euphire ChatPlay] Unhandled loadType: "${loadType}"`);
+            await sendChatPlayFeedback(message.channel, "❌ No results found for that search.");
+        }
+    } catch (error) {
+        console.error("[euphire ChatPlay] Error:", error.message);
+        await sendChatPlayFeedback(
+            message.channel,
+            error.code === "VOICE_CHANNEL_PERMISSION_MISSING"
+                ? error.message
+                : "❌ Something went wrong while searching for that song."
+        );
+    }
+
+    return true;
+}
+
+module.exports = { handleChatPlayMessage };
