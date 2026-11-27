@@ -1,7 +1,6 @@
 const { endSession } = require("./mongoStats");
 const { removeSavedSession } = require("./playbackRecovery");
 const { markIntentionalDisconnect } = require("./playback");
-const { returnPlayerToWaitingRoom } = require("./waitingRoom");
 
 function initiatePlayerStop(player) {
     const sessionId = player.currentSessionId;
@@ -10,7 +9,7 @@ function initiatePlayerStop(player) {
 
     player.currentSessionId = null;
     player.leaveAfterQueueEnd = false;
-    player._returningToWaitingRoom = true;
+    player._stoppingPlayer = true;
     player.queue?.clear?.();
     if (player.idleTimeout) {
         clearTimeout(player.idleTimeout);
@@ -52,30 +51,16 @@ async function finishPlayerStop(client, player, guildId, action, session) {
         );
     });
 
-    let returnedToWaitingRoom = false;
+    markIntentionalDisconnect(player);
     try {
-        returnedToWaitingRoom = await returnPlayerToWaitingRoom(
-            client,
-            player
-        );
+        await player.destroy?.();
     } catch (error) {
         console.error(
-            `[euphire] Failed to return ${client.botId} to the waiting room after ${action}:`,
+            `[euphire] Could not disconnect ${client.botId} after ${action}:`,
             error
         );
-    }
-
-    if (!returnedToWaitingRoom) {
-        delete player._returningToWaitingRoom;
-        markIntentionalDisconnect(player);
-        try {
-            player.destroy?.();
-        } catch (error) {
-            console.error(
-                `[euphire] Could not disconnect ${client.botId} after ${action}:`,
-                error
-            );
-        }
+    } finally {
+        delete player._stoppingPlayer;
     }
 }
 

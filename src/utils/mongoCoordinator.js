@@ -16,6 +16,7 @@ class MongoCoordinator {
         this.sessionOwners = new Map(); // voiceChannelId -> botId
         this.sessionDJs = new Map(); // voiceChannelId -> userId
         this.sessionChannels = new Map(); // voiceChannelId -> textChannelId
+        this.sessionGuilds = new Map(); // voiceChannelId -> guildId
         this.botSessions = new Map(); // botId -> Set<voiceChannelId>
         this.botStatus = new Map(); // botId -> status
     }
@@ -75,6 +76,12 @@ class MongoCoordinator {
         
         for (const session of sessions) {
             this.sessionOwners.set(session.voiceChannelId, session.botId);
+            if (session.guildId) {
+                this.sessionGuilds.set(
+                    session.voiceChannelId,
+                    String(session.guildId)
+                );
+            }
             if (session.userId) {
                 this.sessionDJs.set(session.voiceChannelId, String(session.userId));
             }
@@ -127,6 +134,7 @@ class MongoCoordinator {
     setSessionDJ(voiceChannelId, userId) {
         if (!voiceChannelId || !userId) return;
         this.sessionDJs.set(voiceChannelId, String(userId));
+        this.updateStatusBoard(this.sessionGuilds.get(voiceChannelId));
     }
 
     getSessionDJ(voiceChannelId) {
@@ -163,6 +171,18 @@ class MongoCoordinator {
         return this.sessionChannels.get(voiceChannelId) || null;
     }
 
+    updateStatusBoard(guildId) {
+        if (!guildId) return;
+        require("./waitingRoomStatus")
+            .updateWaitingRoomStatus(guildId)
+            .catch((error) => {
+                console.error(
+                    `[euphire] Failed to refresh the Euphie status board in guild ${guildId}:`,
+                    error
+                );
+            });
+    }
+
     /**
      * Reserve a bot for a voice channel
      */
@@ -192,21 +212,8 @@ class MongoCoordinator {
         if (guildId) {
             const currentVcInGuild = this.getBotVoiceChannelInGuild(botId, guildId);
             if (currentVcInGuild && currentVcInGuild !== voiceChannelId) {
-                const currentPlayer =
-                    this.getRiffy(botId)?.players?.get(guildId);
-                const currentSessionOwner =
-                    this.sessionOwners.get(currentVcInGuild);
-                const isWaitingRoom =
-                    require("./waitingRoom").isWaitingRoomChannel(
-                        guildId,
-                        currentVcInGuild
-                    ) &&
-                    currentSessionOwner !== botId &&
-                    (currentPlayer?._waitingRoom || !currentPlayer);
-                if (!isWaitingRoom) {
-                    console.log(`[euphire] Cannot reserve bot ${botId} for VC ${voiceChannelId} - already occupied in guild ${guildId} VC ${currentVcInGuild}`);
-                    return false;
-                }
+                console.log(`[euphire] Cannot reserve bot ${botId} for VC ${voiceChannelId} - already occupied in guild ${guildId} VC ${currentVcInGuild}`);
+                return false;
             }
         }
 
@@ -216,6 +223,9 @@ class MongoCoordinator {
         
         // Update in-memory maps
         this.sessionOwners.set(voiceChannelId, botId);
+        if (guildId) {
+            this.sessionGuilds.set(voiceChannelId, String(guildId));
+        }
         if (userId) {
             this.sessionDJs.set(voiceChannelId, String(userId));
         }
@@ -226,6 +236,7 @@ class MongoCoordinator {
 
         // Save to MongoDB
         await this.saveSessionToDB(voiceChannelId, botId, guildId, userId);
+        this.updateStatusBoard(guildId);
 
         return true;
     }
@@ -236,6 +247,13 @@ class MongoCoordinator {
     async releaseBot(voiceChannelId, expectedBotId = null) {
         const botId = this.sessionOwners.get(voiceChannelId);
         if (!botId || (expectedBotId && botId !== expectedBotId)) return;
+        const client = this.getClient(botId);
+        const guildId =
+            this.sessionGuilds.get(voiceChannelId) ||
+            client?.channels?.cache?.get(voiceChannelId)?.guild?.id ||
+            client?.guilds?.cache?.find((guild) =>
+                guild.channels.cache.has(voiceChannelId)
+            )?.id;
 
         console.log(`[euphire] Releasing bot ${botId} from voice channel ${voiceChannelId}`);
 
@@ -243,6 +261,7 @@ class MongoCoordinator {
         this.sessionOwners.delete(voiceChannelId);
         this.sessionDJs.delete(voiceChannelId);
         this.sessionChannels.delete(voiceChannelId);
+        this.sessionGuilds.delete(voiceChannelId);
         if (this.botSessions.has(botId)) {
             this.botSessions.get(botId).delete(voiceChannelId);
         }
@@ -255,6 +274,7 @@ class MongoCoordinator {
 
         // Delete from MongoDB
         await this.deleteSessionFromDB(voiceChannelId);
+        this.updateStatusBoard(guildId);
 
         console.log(`[euphire] Released bot ${botId} from voice channel ${voiceChannelId}`);
     }
@@ -305,7 +325,6 @@ class MongoCoordinator {
                     g.channels.cache.has(voiceChannelId)
                 );
             let isConnected = false;
-            let connectedPlayer = null;
 
             // 1. Check voice channel members if cached
             if (vc?.members?.has(client.user.id)) {
@@ -324,24 +343,10 @@ class MongoCoordinator {
             if (client.riffy?.players) {
                 for (const [, p] of client.riffy.players) {
                     if (p && p.voiceChannel === voiceChannelId) {
-                        connectedPlayer = p;
-                        if (!p._waitingRoom) isConnected = true;
-                        else isConnected = false;
+                        isConnected = true;
                         break;
                     }
                 }
-            }
-
-            if (
-                isConnected &&
-                require("./waitingRoom").isWaitingRoomChannel(
-                    targetGuild?.id || guild?.id,
-                    voiceChannelId
-                ) &&
-                !this.sessionOwners.has(voiceChannelId) &&
-                (!connectedPlayer || connectedPlayer._waitingRoom)
-            ) {
-                continue;
             }
 
             if (isConnected) {
@@ -467,21 +472,7 @@ class MongoCoordinator {
 
             const vcInGuild = this.getBotVoiceChannelInGuild(botId, guildId);
             if (vcInGuild) {
-                const player = client.riffy?.players?.get(guildId);
-                const sessionOwner = this.sessionOwners.get(vcInGuild);
-                const inWaitingRoom =
-                    require("./waitingRoom").isWaitingRoomChannel(
-                        guildId,
-                        vcInGuild
-                    ) &&
-                    sessionOwner !== botId &&
-                    (player?._waitingRoom ||
-                        (!player?.playing &&
-                            !player?.paused &&
-                            !player?.queue?.length));
-                if (!inWaitingRoom) {
-                    return false; // Already in an active voice channel in THIS guild
-                }
+                return false; // Already in a voice channel in THIS guild
             }
             return true;
         }

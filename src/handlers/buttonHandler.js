@@ -563,21 +563,14 @@ async function handleButtonInteraction(client, interaction) {
                 clearTimeout(player.idleTimeout);
                 player.idleTimeout = null;
             }
-            let returnedToWaitingRoom = false;
+            player._stoppingPlayer = true;
             try {
-                returnedToWaitingRoom = await require("../utils/waitingRoom")
-                    .returnPlayerToWaitingRoom(client, player);
-            } catch (error) {
-                console.error(
-                    `[euphire] Failed to return ${client.botId} to the waiting room after stop button:`,
-                    error
-                );
-            }
-            if (!returnedToWaitingRoom) {
                 player.queue.clear();
                 player.stop();
                 markIntentionalDisconnect(player);
-                player.destroy();
+                await player.destroy();
+            } finally {
+                delete player._stoppingPlayer;
             }
             return;
         }

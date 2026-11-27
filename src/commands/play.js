@@ -18,9 +18,11 @@ const {
     findSpotifyTrackMetadata,
     applySpotifyTrackMetadata,
     resolveSpotifyTrackAudio,
+    buildIdentifiers,
 } = require("../utils/search");
 const config = require("../../config");
 const { getSpotifyPlaylistMetadata } = require("../utils/spotifyPlaylistSearch");
+const { sendPlaybackFailureLog } = require("../services/statusMonitor");
 
 // mm:ss, zero padded (03:07)
 function fmt(ms) {
@@ -407,14 +409,17 @@ module.exports = {
             });
         }
 
+        const trimmedQuery = query.trim();
+        const isSpotifyUrl =
+            /^https?:\/\/(?:www\.)?open\.spotify\.com\//i.test(trimmedQuery);
+        const isUrl = /^https?:\/\//i.test(trimmedQuery);
+        const searchSource = isUrl && !isSpotifyUrl ? "ytsearch" : "spsearch";
+        const attemptedSearches = buildIdentifiers(trimmedQuery, searchSource);
+
         try {
-            const trimmedQuery = query.trim();
-            const isSpotifyUrl =
-                /^https?:\/\/(?:www\.)?open\.spotify\.com\//i.test(trimmedQuery);
-            const isUrl = /^https?:\/\//i.test(trimmedQuery);
             const result = await client.riffy.resolve({
                 query: trimmedQuery,
-                source: isUrl && !isSpotifyUrl ? "ytsearch" : "spsearch",
+                source: searchSource,
                 requester: interaction.user,
             });
 
@@ -626,17 +631,41 @@ module.exports = {
                 let track = tracks[0];
                 failureTrack = track || null;
                 if (!track) {
+                    void sendPlaybackFailureLog({
+                        client,
+                        context: interaction,
+                        query: trimmedQuery,
+                        reason: "Search returned no track.",
+                        searchSource,
+                        attemptedSearches,
+                        loadType,
+                        error: exception,
+                    });
                     return interaction.editReply({
                         embeds: [buildPlayErrorEmbed()],
                     });
                 }
 
+                const youtubeSearches = [];
                 track = await resolveSpotifyTrackAudio(
                     client.riffy,
                     track,
-                    interaction.user
+                    interaction.user,
+                    { onYoutubeSearch: (identifier) => youtubeSearches.push(identifier) }
                 );
                 if (!track) {
+                    sendPlaybackFailureLog({
+                        client,
+                        context: interaction,
+                        query: trimmedQuery,
+                        reason: "A search result was found, but no playable YouTube audio match was found.",
+                        searchSource,
+                        attemptedSearches: youtubeSearches.length
+                            ? youtubeSearches
+                            : attemptedSearches,
+                        loadType,
+                        track: failureTrack,
+                    });
                     return interaction.editReply({
                         embeds: [buildPlayErrorEmbed(failureTrack)],
                     });
@@ -699,12 +728,32 @@ module.exports = {
                 console.warn(
                     `[euphire] No playable results for "${query}" (loadType: ${loadType})${failure ? `: ${failure}` : ""}`
                 );
+                sendPlaybackFailureLog({
+                    client,
+                    context: interaction,
+                    query: trimmedQuery,
+                    reason: failure || "No playable source was returned for this search.",
+                    searchSource,
+                    attemptedSearches,
+                    loadType,
+                    error: exception,
+                });
                 return interaction.editReply({
                     embeds: [buildPlayErrorEmbed()],
                 });
             }
         } catch (error) {
             console.error("[euphire] Play error:", error.message);
+            sendPlaybackFailureLog({
+                client,
+                context: interaction,
+                query,
+                reason: "An error occurred while resolving or queueing this search.",
+                searchSource,
+                attemptedSearches,
+                track: failureTrack,
+                error,
+            });
             return interaction.editReply({
                 embeds: [buildPlayErrorEmbed(failureTrack)],
             });

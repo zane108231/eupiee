@@ -1,144 +1,143 @@
-const fs = require("fs");
-const path = require("path");
-const { WebhookClient, MessageFlags } = require("discord.js");
+const { EmbedBuilder, WebhookClient } = require("discord.js");
 const config = require("../../config");
-const { buildStatusContainer } = require("../utils/statusPage");
-const { getDB, isDBConnected } = require("../utils/database");
-
-const STATUS_STORE_PATH = path.join(__dirname, "..", "..", "data", "status-webhook.json");
-const UPDATE_INTERVAL_MS = 60 * 1000;
 
 let webhookClient = null;
-let messageId = null;
-let updateTimer = null;
-let lastSnapshot = null;
-let activeClient = null;
 
-async function loadMessageId() {
-    if (isDBConnected()) {
-        try {
-            const db = getDB();
-            const doc = await db.collection("botSettings").findOne({ key: "statusWebhookMessageId" });
-            if (doc?.value) return doc.value;
-        } catch (_) {}
-    }
-
-    if (!fs.existsSync(STATUS_STORE_PATH)) return null;
-
-    try {
-        const data = JSON.parse(fs.readFileSync(STATUS_STORE_PATH, "utf-8"));
-        return data.messageId || null;
-    } catch {
-        return null;
-    }
+function clip(value, limit = 1024) {
+    const text = String(value ?? "Not available");
+    return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
 }
 
-function saveMessageId(id) {
-    if (isDBConnected()) {
-        try {
-            const db = getDB();
-            if (id) {
-                db.collection("botSettings").updateOne(
-                    { key: "statusWebhookMessageId" },
-                    { $set: { key: "statusWebhookMessageId", value: id, updatedAt: Date.now() } },
-                    { upsert: true }
-                ).catch(() => {});
-            } else {
-                db.collection("botSettings").deleteOne({ key: "statusWebhookMessageId" }).catch(() => {});
-            }
-        } catch (_) {}
-    }
-
-    try {
-        const dir = path.dirname(STATUS_STORE_PATH);
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
-
-        const payload = id ? { messageId: id } : {};
-        fs.writeFileSync(STATUS_STORE_PATH, JSON.stringify(payload, null, 2), "utf-8");
-    } catch (_) {}
-}
-
-function getStatusSnapshot(client) {
-    const container = buildStatusContainer(client, { interactive: false });
-    return JSON.stringify(container.toJSON());
-}
-
-async function pushStatusUpdate(client, force = false) {
-    if (!config.statusWebhookUrl) return;
-
-    const snapshot = getStatusSnapshot(client);
-    if (!force && snapshot === lastSnapshot) return;
-
-    lastSnapshot = snapshot;
-
+function getWebhookClient() {
+    if (!config.statusWebhookUrl) return null;
     if (!webhookClient) {
         webhookClient = new WebhookClient({ url: config.statusWebhookUrl });
     }
+    return webhookClient;
+}
 
-    const container = buildStatusContainer(client, { interactive: false });
-    const payload = {
-        components: [container],
-        flags: MessageFlags.IsComponentsV2,
-        withComponents: true,
-    };
+async function sendPlaybackFailureLog({
+    client,
+    context,
+    query,
+    reason,
+    searchSource,
+    attemptedSearches = [],
+    loadType,
+    track,
+    error,
+}) {
+    let webhook;
+    try {
+        webhook = getWebhookClient();
+    } catch (error) {
+        console.error("[euphire] Could not initialize playback failure webhook:", error.message);
+        return;
+    }
+    if (!webhook) return;
+
+    const user = context?.user || context?.author;
+    const guild = context?.guild;
+    const channel = context?.channel;
+    const voiceChannel =
+        context?.member?.voice?.channel || context?.voiceChannel;
+    const userLabel = user
+        ? `${user.tag || user.username || "Unknown user"} (${user.id})`
+        : "Not available";
+    const trackLabel = track?.info
+        ? `${track.info.title || "Unknown title"}${track.info.author ? ` — ${track.info.author}` : ""}`
+        : null;
+    const errorDetails = error
+        ? [error.name, error.code, error.message || String(error)]
+              .filter(Boolean)
+              .join(": ")
+        : null;
+
+    const embed = new EmbedBuilder()
+        .setColor(0xe74c3c)
+        .setTitle("Playback Search Failure")
+        .setDescription(clip(reason, 4000))
+        .setTimestamp()
+        .addFields(
+            { name: "User", value: clip(userLabel), inline: true },
+            {
+                name: "Guild",
+                value: clip(guild ? `${guild.name} (${guild.id})` : "Not available"),
+                inline: true,
+            },
+            {
+                name: "Text channel",
+                value: clip(channel ? `#${channel.name || "unknown"} (${channel.id})` : "Not available"),
+                inline: true,
+            },
+            {
+                name: "Voice channel",
+                value: clip(voiceChannel ? `${voiceChannel.name} (${voiceChannel.id})` : "Not available"),
+                inline: true,
+            },
+            { name: "Requested search", value: clip(query), inline: false },
+            {
+                name: "Search source",
+                value: clip(searchSource || "Not available"),
+                inline: true,
+            },
+            {
+                name: "Load type",
+                value: clip(loadType || "Not available"),
+                inline: true,
+            },
+            ...(trackLabel
+                ? [{ name: "Resolved track", value: clip(trackLabel), inline: false }]
+                : []),
+            {
+                name: "Exact search attempts",
+                value: clip(
+                    attemptedSearches.length
+                        ? attemptedSearches.map((item) => `• ${item}`).join("\n")
+                        : "No search request was recorded",
+                    1024
+                ),
+                inline: false,
+            },
+            ...(errorDetails
+                ? [{ name: "Error details", value: clip(errorDetails), inline: false }]
+                : []),
+            ...(client?.botId
+                ? [{ name: "Bot instance", value: clip(client.botId), inline: true }]
+                : [])
+        );
 
     try {
-        if (messageId) {
-            await webhookClient.editMessage(messageId, payload);
-            return;
-        }
-
-        const message = await webhookClient.send(payload);
-        messageId = message.id;
-        saveMessageId(messageId);
-    } catch (error) {
-        if (error.code === 10008 && messageId) {
-            messageId = null;
-            saveMessageId();
-            const message = await webhookClient.send(payload);
-            messageId = message.id;
-            saveMessageId(messageId);
-            return;
-        }
-
-        console.error("[euphire] Failed to update status webhook:", error.message);
+        await webhook.send({
+            embeds: [embed],
+            allowedMentions: { parse: [] },
+        });
+    } catch (sendError) {
+        console.error(
+            "[euphire] Failed to send playback failure to status webhook:",
+            sendError.message
+        );
     }
 }
 
-function scheduleStatusUpdate(client, force = false) {
-    if (client) activeClient = client;
-    if (!activeClient) return;
-
-    pushStatusUpdate(activeClient, force).catch((error) => {
-        console.error("[euphire] Status update error:", error.message);
-    });
-}
-
-async function startStatusMonitor(client) {
+function startStatusMonitor() {
     if (!config.statusWebhookUrl) {
-        console.warn("[euphire] STATUS_WEBHOOK_URL not set — status monitor disabled.");
+        console.warn("[euphire] STATUS_WEBHOOK_URL not set — playback failure logging disabled.");
         return;
     }
 
-    activeClient = client;
-    messageId = await loadMessageId();
-
-    setTimeout(() => {
-        scheduleStatusUpdate(client, true);
-    }, 3000);
-
-    if (updateTimer) clearInterval(updateTimer);
-    updateTimer = setInterval(() => {
-        scheduleStatusUpdate(client, false);
-    }, UPDATE_INTERVAL_MS);
-
-    console.log("[euphire] Status monitor started.");
+    try {
+        getWebhookClient();
+        console.log("[euphire] Playback failure webhook logging enabled.");
+    } catch (error) {
+        console.error(
+            "[euphire] Could not initialize playback failure webhook:",
+            error.message
+        );
+    }
 }
 
 module.exports = {
     startStatusMonitor,
-    scheduleStatusUpdate,
-    pushStatusUpdate,
+    sendPlaybackFailureLog,
 };

@@ -123,17 +123,27 @@ module.exports = {
         const releaseNewReservation = async () => {
             if (!newlyReserved) return;
             if (!existingPlayer && player) {
-                markIntentionalDisconnect(player);
-                player.destroy();
-            } else if (existingPlayer) {
+                player._stoppingPlayer = true;
                 try {
-                    await require("../utils/waitingRoom")
-                        .returnPlayerToWaitingRoom(targetClient, existingPlayer);
+                    markIntentionalDisconnect(player);
+                    await player.destroy();
+                } finally {
+                    delete player._stoppingPlayer;
+                }
+            } else if (existingPlayer) {
+                existingPlayer._stoppingPlayer = true;
+                try {
+                    existingPlayer.queue?.clear?.();
+                    existingPlayer.stop?.();
+                    markIntentionalDisconnect(existingPlayer);
+                    await existingPlayer.destroy?.();
                 } catch (error) {
                     console.error(
-                        `[euphire] Failed to return ${targetClient.botId} to the waiting room after insert failure:`,
+                        `[euphire] Failed to disconnect ${targetClient.botId} after insert failure:`,
                         error
                     );
+                } finally {
+                    delete existingPlayer._stoppingPlayer;
                 }
             }
             await coordinator.releaseBot(voiceChannelId, targetClient.botId);

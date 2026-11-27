@@ -14,7 +14,7 @@ euphire is a ChatPlay-focused Discord music bot that also operates like a standa
 - Supports queue management, shuffle, seek, volume, loop, and now playing
 - Built-in commands for help, bot stats, and track information
 - Server-local Euphie model milestone after 100 hours of active listening (`/modelstats`, `/modelchannel`, and `/setmodel`; bot-owner only); `/botprofile copy` and `/botprofile reset` manage the server-specific profile, the current model can upload an avatar with `/modelprofile`, and the developer can configure profiles with `/developerprofile`
-- Developer-only `/waitingroom set`, `/waitingroom enable`, `/waitingroom disable`, and `/waitingroom status` configure an optional per-server voice room for available bots; bots return there after explicit stop/leave actions, a manual disconnect, when a session becomes idle, or after its voice channel has been empty for three minutes
+- Developer-only `/waitingroom set`, `/waitingroom enable`, `/waitingroom disable`, and `/waitingroom status` manage a per-server text-channel status board showing which Euphie instances are in use and their session DJs. The board uses plain-text names without user mentions; idle bots no longer join a standby voice channel.
 
 ## Docker Deployment (Recommended)
 

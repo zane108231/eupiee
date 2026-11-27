@@ -67,9 +67,12 @@ BOT_5_TOKEN=your_bot_5_token_here
 # Discord Client ID (for slash command deployment)
 CLIENT_ID=your_client_id_here
 
-# Status Webhook URL (optional)
+# Status Webhook URL (optional; receives playback failure log embeds)
 STATUS_WEBHOOK_URL=your_status_webhook_url_here
 ```
+
+Playback failure embeds include the requester, guild and channel, original search,
+exact search identifiers sent to Lavalink/YouTube, and any returned error details.
 
 ### Getting Bot Tokens
 

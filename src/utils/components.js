@@ -14,7 +14,7 @@ const {
 } = require("discord.js");
 const { ButtonStyle } = require("discord.js");
 const {
-    getSpotifyTrackDisplayName,
+    getSpotifyTrackDisplayParts,
     getSpotifyTrackFailureName,
     getSpotifyTrackUrl,
 } = require("./search");
@@ -98,18 +98,18 @@ function getSpotifyEmoji(client = null, player = null) {
  */
 function createNowPlayingContainer(track, player, guildData, musicardBuffer, client = null) {
     const container = new ContainerBuilder();
-
-    const hasAuthor = Boolean(track?.info?.displayAuthor || track?.info?.author);
-    const displayName = hasAuthor
-        ? getSpotifyTrackDisplayName(track)
-        : track?.info?.displayTitle || track?.info?.title || "Unknown";
+    const { title, artist } = getSpotifyTrackDisplayParts(track);
 
     const activeClient = client || player?.node?.riffy?.client || player?.client || null;
     const spotifyEmoji = getSpotifyEmoji(activeClient, player);
     const spotifyUrl = getSpotifyTrackUrl(track);
-
-    // Format: "<:spotify:emoji> Started playing [Song Title by Artist](Spotify URL)"
-    const displayText = displayName;
+    const escapedTitle = title.replace(/[\[\]]/g, "\\$&").slice(0, 512);
+    const escapedArtist = artist
+        ? artist.replace(/[\[\]]/g, "\\$&").slice(0, 256)
+        : null;
+    const displayText = escapedArtist
+        ? `**${escapedTitle}** **by** **${escapedArtist}**`
+        : `**${escapedTitle}**`;
 
     let messageContent = `${spotifyEmoji} Started playing ${displayText}`;
     if (spotifyUrl) {

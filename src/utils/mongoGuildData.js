@@ -18,6 +18,7 @@ function createDefaultGuildData() {
         twentyFourSeven: false,
         waitingRoomEnabled: false,
         waitingRoomChannelId: null,
+        waitingRoomStatusTargetChannelId: null,
         waitingRoomStatusMessageId: null,
         waitingRoomStatusChannelId: null,
         automaticModelEnabled: true,

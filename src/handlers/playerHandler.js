@@ -8,7 +8,6 @@ const {
     getSpotifyEmoji,
 } = require("../utils/components");
 const { recordIncident } = require("../utils/incidents");
-const { scheduleStatusUpdate } = require("../services/statusMonitor");
 const {
     markPlayerIdle,
     markIntentionalDisconnect,
@@ -22,6 +21,7 @@ const { startPlayerTracking, stopPlayerTracking } = require("../utils/modelMiles
 const { updateNowPlaying, scrobble } = require("../utils/lastfm");
 const {
     getSpotifyTrackDisplayName,
+    getSpotifyTrackDisplayParts,
     getSpotifyTrackFailureName,
     getSpotifyTrackUrl,
     findSpotifyTrackMetadata,
@@ -267,13 +267,18 @@ async function sendLastfmLoginPrompt(client, player, guildData, userId) {
 }
 
 function buildStartedPlayingEmbed(client, player, track) {
-    const displayName = getSpotifyTrackDisplayName(track)
-        .replace(/[\[\]]/g, "\\$&")
-        .slice(0, 512);
+    const { title, artist } = getSpotifyTrackDisplayParts(track);
+    const escapedTitle = title.replace(/[\[\]]/g, "\\$&").slice(0, 512);
+    const escapedArtist = artist
+        ? artist.replace(/[\[\]]/g, "\\$&").slice(0, 256)
+        : null;
+    const displayName = escapedArtist
+        ? `**${escapedTitle}** **by** **${escapedArtist}**`
+        : `**${escapedTitle}**`;
     const spotifyUrl = getSpotifyTrackUrl(track);
     const trackText = spotifyUrl
-        ? `[**${displayName}**](${spotifyUrl})`
-        : `**${displayName}**`;
+        ? `[${displayName}](${spotifyUrl})`
+        : displayName;
 
     return new EmbedBuilder()
         .setColor(0x4f545c)
@@ -441,32 +446,27 @@ function setupPlayerHandler(client) {
     // --- Node Connected ---
     client.riffy.on("nodeConnect", (node) => {
         console.log(`[euphire] Lavalink node "${node.name}" connected.`);
-        scheduleStatusUpdate(client, true);
     });
 
     // --- Node Error ---
     client.riffy.on("nodeError", (node, error) => {
         console.error(`[euphire] Node "${node.name}" error:`, error.message);
         recordIncident("Lavalink", `Node error: ${error.message.substring(0, 50)}`);
-        scheduleStatusUpdate(client, true);
     });
 
     client.riffy.on("nodeDestroy", (node) => {
         console.warn(`[euphire] Node "${node.name}" was removed.`);
-        scheduleStatusUpdate(client, true);
     });
 
     // --- Node Disconnect ---
     client.riffy.on("nodeDisconnect", (node) => {
         console.warn(`[euphire] Node "${node.name}" disconnected.`);
         recordIncident("Lavalink", "Node disconnected");
-        scheduleStatusUpdate(client, true);
     });
 
     // --- Node Reconnected (Riffy built-in auto-reconnect) ---
     client.riffy.on("nodeReconnect", (node) => {
         console.log(`[euphire] Node "${node.name}" reconnected successfully.`);
-        scheduleStatusUpdate(client, true);
     });
 
     // --- Track Start ---
@@ -830,7 +830,7 @@ function setupPlayerHandler(client) {
     // --- Queue End ---
     client.riffy.on("queueEnd", async (player) => {
         try {
-            if (player._waitingRoom || player._returningToWaitingRoom) return;
+            if (player._stoppingPlayer) return;
             if (player._restoringSession || player._pendingResumeSnapshot) {
                 console.log(
                     `[euphire] Ignoring queueEnd while restoring saved session for guild ${player.guildId}`
@@ -922,19 +922,13 @@ function setupPlayerHandler(client) {
                         );
                     });
                 stopVoiceChannelMonitoring(player.guildId, client.botId);
-                const returnedToWaitingRoom = await require("../utils/waitingRoom")
-                    .returnPlayerToWaitingRoom(client, player)
-                    .catch((error) => {
-                        console.error(
-                            `[euphire] Failed to return ${client.botId} to the waiting room after playleave in guild ${player.guildId}:`,
-                            error
-                        );
-                        return false;
-                    });
-                if (!returnedToWaitingRoom) {
-                    await coordinator.releaseBot(player.voiceChannel, client.botId);
-                    markIntentionalDisconnect(player);
-                    player.destroy();
+                await coordinator.releaseBot(player.voiceChannel, client.botId);
+                markIntentionalDisconnect(player);
+                player._stoppingPlayer = true;
+                try {
+                    await player.destroy();
+                } finally {
+                    delete player._stoppingPlayer;
                 }
                 return;
             }
@@ -1000,17 +994,13 @@ function setupPlayerHandler(client) {
     // --- Player Disconnect ---
     client.riffy.on("playerDisconnect", async (player) => {
         const guildData = getGuildData(player.guildId);
-        if (player._waitingRoom) {
-            if (player.idleTimeout) clearTimeout(player.idleTimeout);
-            return;
-        }
         await stopPlayerTracking(player, true);
         if (guildData.recreatingPlayer) return;
 
         console.log(`[euphire] playerDisconnect fired for bot ${client.botId} in guild ${player.guildId}`);
 
         // Release bot reservation so it becomes available immediately
-        if (!player._waitingRoom && player.voiceChannel) {
+        if (player.voiceChannel) {
             await coordinator.releaseBot(player.voiceChannel, client.botId);
         }
 
@@ -1144,11 +1134,6 @@ function checkVoiceChannelState(client, guildId) {
         stopVoiceChannelMonitoring(guildId, client.botId);
         return;
     }
-    if (player._waitingRoom) {
-        stopVoiceChannelMonitoring(guildId, client.botId);
-        return;
-    }
-
     const guild = client.guilds.cache.get(guildId);
     if (!guild) return;
 
@@ -1193,7 +1178,7 @@ function hasOtherActivePlayer(client, guildId) {
     return coordinator.getAllClients().some((otherClient) => {
         if (otherClient === client) return false;
         const otherPlayer = otherClient.riffy?.players?.get(guildId);
-        return Boolean(otherPlayer?.voiceChannel && !otherPlayer._waitingRoom);
+        return Boolean(otherPlayer?.voiceChannel);
     });
 }
 

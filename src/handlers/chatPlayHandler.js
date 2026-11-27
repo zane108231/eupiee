@@ -1,5 +1,7 @@
 const { MessageFlags } = require("discord.js");
+const { buildIdentifiers, resolveSpotifyTrackAudio } = require("../utils/search");
 const { getGuildData } = require("../utils/mongoGuildData");
+const { sendPlaybackFailureLog } = require("../services/statusMonitor");
 const {
     createChatPlayLoadingContainer,
     createCouldNotPlayEmbed,
@@ -125,6 +127,7 @@ async function handleChatPlayMessage(client, message) {
         });
 
         const { loadType, tracks, playlistInfo } = result;
+        const attemptedSearches = buildIdentifiers(query.trim(), "spsearch", true);
 
         const requiredPermission =
             loadType === "playlist" ||
@@ -175,17 +178,40 @@ async function handleChatPlayMessage(client, message) {
         ) {
             let track = tracks[0];
             if (!track) {
+                sendPlaybackFailureLog({
+                    client,
+                    context: message,
+                    query,
+                    reason: "Search returned no track.",
+                    searchSource: "spsearch",
+                    attemptedSearches,
+                    loadType,
+                });
                 await sendChatPlayFeedback(message.channel, "❌ No results found for that search.");
                 return true;
             }
 
             const spotifyTrack = track;
-            track = await require("../utils/search").resolveSpotifyTrackAudio(
+            const youtubeSearches = [];
+            track = await resolveSpotifyTrackAudio(
                 client.riffy,
                 track,
-                message.author
+                message.author,
+                { onYoutubeSearch: (identifier) => youtubeSearches.push(identifier) }
             );
             if (!track) {
+                sendPlaybackFailureLog({
+                    client,
+                    context: message,
+                    query,
+                    reason: "A search result was found, but no playable YouTube audio match was found.",
+                    searchSource: "spsearch",
+                    attemptedSearches: youtubeSearches.length
+                        ? youtubeSearches
+                        : attemptedSearches,
+                    loadType,
+                    track: spotifyTrack,
+                });
                 await sendChatPlayFeedback(
                     message.channel,
                     { embeds: [createCouldNotPlayEmbed(spotifyTrack)] }
@@ -204,13 +230,40 @@ async function handleChatPlayMessage(client, message) {
             } catch (err) {}
             await startIfIdle(player);
         } else if (loadType === "empty" || loadType === "EMPTY" || loadType === "NO_MATCHES") {
+            sendPlaybackFailureLog({
+                client,
+                context: message,
+                query,
+                reason: "No tracks matched the requested search.",
+                searchSource: "spsearch",
+                attemptedSearches,
+                loadType,
+            });
             await sendChatPlayFeedback(message.channel, "❌ No results found for that search.");
         } else {
             console.log(`[euphire ChatPlay] Unhandled loadType: "${loadType}"`);
+            sendPlaybackFailureLog({
+                client,
+                context: message,
+                query,
+                reason: "Search did not return a playable result.",
+                searchSource: "spsearch",
+                attemptedSearches,
+                loadType,
+            });
             await sendChatPlayFeedback(message.channel, "❌ No results found for that search.");
         }
     } catch (error) {
         console.error("[euphire ChatPlay] Error:", error.message);
+        sendPlaybackFailureLog({
+            client,
+            context: message,
+            query,
+            reason: "An error occurred while resolving or queueing this search.",
+            searchSource: "spsearch",
+            attemptedSearches: buildIdentifiers(query, "spsearch", true),
+            error,
+        });
         await sendChatPlayFeedback(
             message.channel,
             error.code === "VOICE_CHANNEL_PERMISSION_MISSING"

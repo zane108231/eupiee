@@ -26,7 +26,7 @@ module.exports = {
             const result = await cancelAllSavedResumeSessions();
             let content =
                 `✅ Cleared **${result.snapshotsCleared}** saved resume snapshot(s) and cancelled **${result.pendingRestoresCancelled}** pending restore(s).\n` +
-                `Returned **${result.botsReturnedToWaitingRoom}** bot(s) to their waiting room; disconnected **${result.botsDisconnected}** bot(s) where no waiting room was available.`;
+                `Disconnected **${result.botsDisconnected}** bot(s) with cancelled resume sessions.`;
             if (result.failures.length) {
                 content += `\n\n⚠️ Some cleanup steps reported errors:\n${result.failures
                     .slice(0, 5)

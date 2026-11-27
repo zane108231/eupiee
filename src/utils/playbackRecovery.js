@@ -27,7 +27,7 @@ function clearResumeTimeout(player) {
 
 async function cancelPendingResumePlayer(client, player, snapshot) {
     if (player._resumeCancellationInProgress) {
-        return { returnedToWaitingRoom: false, alreadyCancelling: true, errors: [] };
+        return { alreadyCancelling: true, errors: [] };
     }
 
     player._resumeCancellationInProgress = true;
@@ -37,7 +37,7 @@ async function cancelPendingResumePlayer(client, player, snapshot) {
     player._sessionPersistTimeout = null;
     delete player._pendingResumeSnapshot;
     player._restoringSession = false;
-    player._returningToWaitingRoom = true;
+    player._stoppingPlayer = true;
 
     const errors = [];
     try {
@@ -52,36 +52,26 @@ async function cancelPendingResumePlayer(client, player, snapshot) {
             errors.push(`Could not stop the restored player: ${error.message}`);
         }
 
-        let returnedToWaitingRoom = false;
+        require("./playback").markIntentionalDisconnect(player);
         try {
-            returnedToWaitingRoom = await require("./waitingRoom")
-                .returnPlayerToWaitingRoom(client, player);
+            await player.destroy();
         } catch (error) {
-            errors.push(`Could not return the bot to its waiting room: ${error.message}`);
+            errors.push(`Could not disconnect the restored player: ${error.message}`);
         }
 
-        if (!returnedToWaitingRoom) {
-            delete player._returningToWaitingRoom;
-            require("./playback").markIntentionalDisconnect(player);
+        const voiceChannelId =
+            snapshot?.voiceChannelId || player.voiceChannel;
+        if (voiceChannelId) {
             try {
-                await player.destroy();
+                await coordinator.releaseBot(voiceChannelId, client.botId);
             } catch (error) {
-                errors.push(`Could not disconnect the restored player: ${error.message}`);
-            }
-
-            const voiceChannelId =
-                snapshot?.voiceChannelId || player.voiceChannel;
-            if (voiceChannelId) {
-                try {
-                    await coordinator.releaseBot(voiceChannelId, client.botId);
-                } catch (error) {
-                    errors.push(`Could not release voice channel ${voiceChannelId}: ${error.message}`);
-                }
+                errors.push(`Could not release voice channel ${voiceChannelId}: ${error.message}`);
             }
         }
 
-        return { returnedToWaitingRoom, alreadyCancelling: false, errors };
+        return { alreadyCancelling: false, errors };
     } finally {
+        delete player._stoppingPlayer;
         delete player._resumeCancellationInProgress;
     }
 }
@@ -121,7 +111,7 @@ async function sendResumeExpiredNotice(client, snapshot) {
         .setTitle("Resume window expired")
         .setDescription(
             "The 3-minute window to run `e!resumesession` has expired. " +
-                "I’m leaving this voice channel and returning to the Euphie Waiting Room."
+                "I’m leaving this voice channel. Use `e!play` to start another session."
         );
 
     try {
@@ -177,40 +167,29 @@ function scheduleResumeTimeout(client, player, snapshot) {
 
         const voiceChannelId =
             pendingSnapshot.voiceChannelId || player.voiceChannel;
-        let returnedToWaitingRoom = false;
+        const { markIntentionalDisconnect } = require("./playback");
+        player._stoppingPlayer = true;
+        markIntentionalDisconnect(player);
         try {
-            returnedToWaitingRoom = await require("./waitingRoom")
-                .returnPlayerToWaitingRoom(client, player);
+            await player.destroy();
         } catch (error) {
-            console.error(
-                `[euphire] Could not return expired resume player to the waiting room in guild ${snapshot.guildId}:`,
-                error
+            console.warn(
+                `[euphire] Could not destroy expired resume player for guild ${snapshot.guildId}:`,
+                error.message
             );
         }
-
-        if (!returnedToWaitingRoom) {
-            const { markIntentionalDisconnect } = require("./playback");
-            markIntentionalDisconnect(player);
+        if (voiceChannelId) {
             try {
-                await player.destroy();
+                await coordinator.releaseBot(voiceChannelId, client.botId);
             } catch (error) {
-                console.warn(
-                    `[euphire] Could not destroy expired resume player for guild ${snapshot.guildId}:`,
+                console.error(
+                    `[euphire] Could not release expired voice session ${voiceChannelId}:`,
                     error.message
                 );
             }
-            if (voiceChannelId) {
-                try {
-                    await coordinator.releaseBot(voiceChannelId, client.botId);
-                } catch (error) {
-                    console.error(
-                        `[euphire] Could not release expired voice session ${voiceChannelId}:`,
-                        error.message
-                    );
-                }
-            }
         }
 
+        delete player._stoppingPlayer;
         delete player._pendingResumeSnapshot;
     }, RESUME_TIMEOUT_MS);
 
@@ -284,7 +263,6 @@ async function saveRecentlyPlayedTrack(track) {
 }
 
 async function writePlayerSnapshot(client, player) {
-    if (player?._waitingRoom) return;
     const queue = Array.from(player.queue || [])
         .map((track) => serializeTrack(track))
         .filter(Boolean);
@@ -340,7 +318,6 @@ function persistPlayer(client, player) {
     if (
         !client ||
         !player?.guildId ||
-        player._waitingRoom ||
         player._restoringSession ||
         player._pendingResumeSnapshot
     ) {
@@ -366,7 +343,7 @@ function persistPlayer(client, player) {
 }
 
 function schedulePersist(client, player) {
-    if (player._waitingRoom || player._restoringSession) return;
+    if (player._restoringSession) return;
 
     clearTimeout(player._sessionPersistTimeout);
     player._sessionPersistTimeout = setTimeout(() => {
@@ -413,7 +390,6 @@ function installPlayerPersistence(client, player) {
 async function checkpointClient(client) {
     const players = Array.from(client?.riffy?.players?.values?.() || []);
     for (const player of players) {
-        if (player._waitingRoom) continue;
         await persistPlayer(client, player);
     }
 }
@@ -715,7 +691,7 @@ async function sendResumePrompt(client, snapshot) {
         .setTitle("Your saved session is ready")
         .setDescription(
             "I’m back in your voice channel with your saved music session ready. " +
-            "Run **`e!resumesession`** within 3 minutes to continue, or I’ll return to the Euphie Waiting Room."
+            "Run **`e!resumesession`** within 3 minutes to continue, or I’ll leave the voice channel."
         );
 
     const payload = {
@@ -829,7 +805,6 @@ async function cancelAllSavedResumeSessions() {
     const result = {
         snapshotsCleared: deletion.deletedCount || 0,
         pendingRestoresCancelled: 0,
-        botsReturnedToWaitingRoom: 0,
         botsDisconnected: 0,
         failures: [],
     };
@@ -853,9 +828,7 @@ async function cancelAllSavedResumeSessions() {
                 player,
                 snapshot
             );
-            if (cancelled.returnedToWaitingRoom) {
-                result.botsReturnedToWaitingRoom += 1;
-            } else if (!cancelled.alreadyCancelling) {
+            if (!cancelled.alreadyCancelling) {
                 result.botsDisconnected += 1;
             }
             for (const error of cancelled.errors) {

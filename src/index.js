@@ -385,7 +385,7 @@ if (missingTokens.length > 0) {
                         .finally(async () => {
                             playbackRecovery.startCheckpointing(client);
                             await require("./utils/waitingRoom")
-                                .restoreClientWaitingRooms(client);
+                                .refreshClientStatusBoards(client);
                         });
                 });
 

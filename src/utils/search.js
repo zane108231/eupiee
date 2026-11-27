@@ -330,7 +330,7 @@ async function resolveTracks(
     return toResult(lastResponse || { loadType: "empty", data: [] }, requester, requestNode);
 }
 
-async function searchYoutubeTrack(riffy, track, requester, node) {
+async function searchYoutubeTrack(riffy, track, requester, node, onSearch) {
     const requestNode = pickNode(riffy, node);
     if (!requestNode) throw new Error("Lavalink node is not available.");
 
@@ -353,6 +353,7 @@ async function searchYoutubeTrack(riffy, track, requester, node) {
     let bestFallbackScore = Number.NEGATIVE_INFINITY;
 
     for (const [queryIndex, query] of [...new Set(queries)].entries()) {
+        onSearch?.(`ytsearch:${query}`);
         const response = await makeSearchRequest(
             requestNode,
             `/${requestNode.rest.version}/loadtracks?identifier=${encodeURIComponent(`ytsearch:${query}`)}`
@@ -405,13 +406,19 @@ async function searchYoutubeTrack(riffy, track, requester, node) {
     return bestLyricsMatch || bestFallbackMatch;
 }
 
-async function resolveSpotifyTrackAudio(riffy, track, requester) {
+async function resolveSpotifyTrackAudio(riffy, track, requester, { onYoutubeSearch } = {}) {
     if (String(track?.info?.sourceName || "").toLowerCase() !== "spotify") {
         return track;
     }
 
     try {
-        const youtubeTrack = await searchYoutubeTrack(riffy, track, requester);
+        const youtubeTrack = await searchYoutubeTrack(
+            riffy,
+            track,
+            requester,
+            undefined,
+            onYoutubeSearch
+        );
         if (!youtubeTrack) {
             console.warn(
                 `[euphire] No matching YouTube video found for Spotify track "${track.info.title}" by "${track.info.author}"`
@@ -524,6 +531,40 @@ function getSpotifyTrackDisplayName(track) {
     return displayArtist && displayArtist !== "Unknown artist"
         ? `${displayTitle} by ${displayArtist}`
         : displayTitle;
+}
+
+function getSpotifyTrackDisplayParts(track) {
+    const info = track?.info || {};
+    const sourceName = String(info.sourceName || "").toLowerCase();
+    const title =
+        info.spotifyTitle ||
+        (sourceName === "spotify" ? info.title : null);
+    const artist =
+        info.spotifyArtist ||
+        (sourceName === "spotify" ? info.author : null);
+
+    if (!title) {
+        return { title: getSpotifyTrackDisplayName(track), artist: null };
+    }
+
+    const displayTitle = cleanDisplayTitle(title);
+    const structuredArtists = Array.isArray(info.artists)
+        ? info.artists
+        : Array.isArray(info.spotifyArtists)
+          ? info.spotifyArtists
+          : null;
+    const primaryArtist = structuredArtists
+        ? structuredArtists[0]?.name || structuredArtists[0]
+        : String(artist || "").split(/,\s*/)[0];
+    const displayArtist = cleanDisplayArtist(primaryArtist);
+
+    return {
+        title: displayTitle,
+        artist:
+            displayArtist && displayArtist !== "Unknown artist"
+                ? displayArtist
+                : null,
+    };
 }
 
 function getSpotifyTrackFailureName(track) {
@@ -812,6 +853,7 @@ module.exports = {
     getTrackDisplayName,
     getProfileTrackDisplayName,
     getSpotifyTrackDisplayName,
+    getSpotifyTrackDisplayParts,
     getSpotifyTrackFailureName,
     getTrackDisplayParts,
     getSpotifyTrackUrl,

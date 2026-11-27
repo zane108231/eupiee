@@ -4,6 +4,9 @@ const {
 } = require("discord.js");
 const { getHumanVoiceMembers } = require("./voiceMembers");
 
+const intentionalDisconnects = new Map();
+const INTENTIONAL_DISCONNECT_TTL_MS = 30_000;
+
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -32,7 +35,32 @@ function markPlayerIdle(player) {
 }
 
 function markIntentionalDisconnect(player) {
-    if (player) player._intentionalDisconnect = true;
+    if (!player) return;
+
+    if (!player.guildId || !player.voiceChannel) return;
+
+    const key = `${player.guildId}:${player.voiceChannel}`;
+    const existingTimeout = intentionalDisconnects.get(key);
+    if (existingTimeout) clearTimeout(existingTimeout);
+
+    const timeout = setTimeout(
+        () => intentionalDisconnects.delete(key),
+        INTENTIONAL_DISCONNECT_TTL_MS
+    );
+    timeout.unref?.();
+    intentionalDisconnects.set(key, timeout);
+}
+
+function consumeIntentionalDisconnect(guildId, voiceChannelId) {
+    if (!guildId || !voiceChannelId) return false;
+
+    const key = `${guildId}:${voiceChannelId}`;
+    const timeout = intentionalDisconnects.get(key);
+    if (!timeout) return false;
+
+    clearTimeout(timeout);
+    intentionalDisconnects.delete(key);
+    return true;
 }
 
 function catchRest(promise) {
@@ -188,27 +216,9 @@ async function ensurePlayer(client, {
     // Anti-theft guard: if this bot is currently in a DIFFERENT voice channel in THIS guild, refuse to steal/move it
     const currentOccupied = getOccupiedVoiceChannel(client.guilds?.cache?.get(guildId), client);
     const existingPlayer = client.riffy.players.get(guildId);
-    const currentVoiceSessionOwner = currentOccupied
-        ? coordinator.getSessionOwner(currentOccupied.id)
-        : null;
-    const currentPlayerIsIdle =
-        !existingPlayer ||
-        existingPlayer._waitingRoom ||
-        (!existingPlayer.playing &&
-            !existingPlayer.paused &&
-            !existingPlayer.queue?.length);
-    const canLeaveWaitingRoom =
-        currentOccupied &&
-        require("./waitingRoom").isWaitingRoomChannel(
-            guildId,
-            currentOccupied.id
-        ) &&
-        currentVoiceSessionOwner !== client.botId &&
-        currentPlayerIsIdle;
     if (
         currentOccupied &&
-        currentOccupied.id !== voiceChannelId &&
-        !canLeaveWaitingRoom
+        currentOccupied.id !== voiceChannelId
     ) {
         throw new Error(`Bot ${client.botId} is already occupied in voice channel ${currentOccupied.id}`);
     }
@@ -219,30 +229,8 @@ async function ensurePlayer(client, {
         voiceChannelId,
         voiceChannelObject
     );
-    if (canLeaveWaitingRoom) {
-        try {
-            await require("./guildBotProfile").setGuildBotAvailability(
-                client,
-                guildId,
-                false
-            );
-        } catch (error) {
-            console.error(
-                `[euphire] Failed to remove the available label from ${client.botId} in guild ${guildId}:`,
-                error
-            );
-        }
-    }
     let player = existingPlayer;
     if (player) {
-        if (
-            currentOccupied &&
-            currentOccupied.id !== voiceChannelId &&
-            canLeaveWaitingRoom
-        ) {
-            player._movingFromWaitingRoom = true;
-        }
-        player._waitingRoom = false;
         if (restoringSession) player._restoringSession = true;
         player.volume = volume;
         if (textChannelId) {
@@ -281,12 +269,6 @@ async function ensurePlayer(client, {
         textChannel: textChannelId,
         deaf: true,
     });
-    player._movingFromWaitingRoom = Boolean(
-        currentOccupied &&
-        currentOccupied.id !== voiceChannelId &&
-        canLeaveWaitingRoom
-    );
-    player._waitingRoom = false;
     if (restoringSession) player._restoringSession = true;
     player.volume = volume;
     if (textChannelId) {
@@ -381,11 +363,6 @@ function setPlayerIdleTimeout(client, player, guildData, reason = "idle") {
             player._idleTimeoutReason = null;
         };
 
-        if (player._waitingRoom) {
-            clearScheduledTimeout();
-            return;
-        }
-
         // If track is playing or queue is not empty, do not leave (unless empty VC reason)
         if (reason !== "empty" && (player.playing || (player.queue && player.queue.length > 0))) {
             clearScheduledTimeout();
@@ -460,29 +437,17 @@ function setPlayerIdleTimeout(client, player, guildData, reason = "idle") {
             player.position ||
             (player.sessionStartedAt ? Date.now() - player.sessionStartedAt : 0);
         player.currentSessionId = null;
-        let returnedToWaitingRoom = false;
+        player._stoppingPlayer = true;
+        markIntentionalDisconnect(player);
         try {
-            returnedToWaitingRoom =
-                await require("./waitingRoom").returnPlayerToWaitingRoom(
-                    client,
-                    player
-                );
+            await player.destroy();
         } catch (error) {
             console.error(
-                `[euphire] Failed to return idle bot ${client.botId} to the waiting room:`,
+                `[euphire] Failed to destroy idle player in guild ${player.guildId}:`,
                 error.message
             );
-        }
-        if (!returnedToWaitingRoom) {
-            markIntentionalDisconnect(player);
-            try {
-                player.destroy();
-            } catch (error) {
-                console.error(
-                    `[euphire] Failed to destroy idle player in guild ${player.guildId}:`,
-                    error.message
-                );
-            }
+        } finally {
+            delete player._stoppingPlayer;
         }
         clearScheduledTimeout();
 
@@ -490,12 +455,8 @@ function setPlayerIdleTimeout(client, player, guildData, reason = "idle") {
             try {
                 const leaveMsg =
                     reason === "empty"
-                        ? returnedToWaitingRoom
-                            ? "No one has been listening for the past 3 minutes, returning to the Euphie Waiting Room 👋"
-                            : "No one has been listening for the past 3 minutes, leaving 👋"
-                        : returnedToWaitingRoom
-                          ? "No tracks have been playing for the past 3 minutes, returning to the Euphie Waiting Room 👋"
-                          : "No tracks have been playing for the past 3 minutes, leaving :wave:";
+                        ? "No one has been listening for the past 3 minutes, leaving."
+                        : "No tracks have been playing for the past 3 minutes, leaving.";
                 const leaveEmbed = new EmbedBuilder().setColor(0xED4245).setDescription(leaveMsg);
                 await targetLeaveChannel.send({ embeds: [leaveEmbed] });
             } catch (err) {
@@ -517,7 +478,7 @@ function setPlayerIdleTimeout(client, player, guildData, reason = "idle") {
 
         // Release bot from coordinator
         try {
-            if (!returnedToWaitingRoom && player.voiceChannel) {
+            if (player.voiceChannel) {
                 await coordinator.releaseBot(player.voiceChannel, client.botId);
             }
         } catch (error) {
@@ -535,6 +496,7 @@ module.exports = {
     startIfIdle,
     markPlayerIdle,
     markIntentionalDisconnect,
+    consumeIntentionalDisconnect,
     ensurePlayer,
     setAnnounceChannel,
     setVolumeSafe,

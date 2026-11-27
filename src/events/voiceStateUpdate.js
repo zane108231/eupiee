@@ -145,42 +145,12 @@ module.exports = {
         ) {
             const targetClient = coordinator.getClient(disconnectedBotId) || client;
             const player = targetClient.riffy?.players?.get(oldState.guild.id);
-            if (player?._waitingRoom) {
-                if (player.idleTimeout) clearTimeout(player.idleTimeout);
-                if (!player._intentionalDisconnect) {
-                    console.warn(
-                        `[euphire] Waiting-room bot ${disconnectedBotId} disconnected from guild ${oldState.guild.id}`
-                    );
-                }
-                try {
-                    const { joinClientToWaitingRoom } = require("../utils/waitingRoom");
-                    const result = await joinClientToWaitingRoom(
-                        targetClient,
-                        oldState.guild.id
-                    );
-                    if (result.status === "joined" || result.status === "already") {
-                        if (!coordinator.botSessions.get(disconnectedBotId)?.size) {
-                            coordinator.markBotAvailable(disconnectedBotId);
-                        }
-                        return;
-                    }
-                    console.warn(
-                        `[euphire] Could not restore waiting-room bot ${disconnectedBotId}: ${result.status}`
-                    );
-                } catch (error) {
-                    console.error(
-                        `[euphire] Failed to restore waiting-room bot ${disconnectedBotId}:`,
-                        error
-                    );
-                }
-                player.destroy();
-                if (!coordinator.botSessions.get(disconnectedBotId)?.size) {
-                    coordinator.markBotAvailable(disconnectedBotId);
-                }
-                return;
-            }
-            const wasIntentionalDisconnect =
-                player?._intentionalDisconnect === true;
+            const wasMarkedIntentional = require("../utils/playback")
+                .consumeIntentionalDisconnect(
+                    oldState.guild.id,
+                    oldState.channelId
+                );
+            const wasIntentionalDisconnect = wasMarkedIntentional;
             if (player) {
                 if (player.idleTimeout) {
                     clearTimeout(player.idleTimeout);
@@ -203,13 +173,13 @@ module.exports = {
             }
 
             // Cleanly release bot from coordinator and mark available
-            console.log(`[euphire] Manual VC disconnect detected for bot ${disconnectedBotId} from VC ${oldState.channelId}`);
             const noticeKey =
                 `${disconnectedBotId}:${oldState.guild.id}:${oldState.channelId}`;
             if (
                 !wasIntentionalDisconnect &&
                 !recentDisconnectNotices.has(noticeKey)
             ) {
+                console.log(`[euphire] Manual VC disconnect detected for bot ${disconnectedBotId} from VC ${oldState.channelId}`);
                 recentDisconnectNotices.add(noticeKey);
                 const noticeCleanup = setTimeout(
                     () => recentDisconnectNotices.delete(noticeKey),
@@ -266,52 +236,28 @@ module.exports = {
             const anotherActivePlayer = coordinator.getAllClients().some((otherClient) => {
                 if (otherClient === targetClient) return false;
                 const otherPlayer = otherClient.riffy?.players?.get(oldState.guild.id);
-                return Boolean(otherPlayer?.voiceChannel && !otherPlayer._waitingRoom);
+                return Boolean(otherPlayer?.voiceChannel);
             });
             if (!anotherActivePlayer) {
                 await resetChatPlayIfActive(targetClient, oldState.guild.id);
             }
-            let returnedToWaitingRoom = false;
             if (player) {
+                player._stoppingPlayer = true;
                 try {
-                    returnedToWaitingRoom =
-                        await require("../utils/waitingRoom")
-                            .returnPlayerToWaitingRoom(targetClient, player);
+                    await player.destroy();
                 } catch (error) {
                     console.error(
-                        `[euphire] Failed to return ${disconnectedBotId} to the waiting room after manual disconnect:`,
+                        `[euphire] Failed to destroy disconnected player for ${disconnectedBotId}:`,
                         error
                     );
-                }
-            } else {
-                try {
-                    const { joinClientToWaitingRoom } = require("../utils/waitingRoom");
-                    const result = await joinClientToWaitingRoom(
-                        targetClient,
-                        oldState.guild.id
-                    );
-                    returnedToWaitingRoom =
-                        result.status === "joined" || result.status === "already";
-                } catch (error) {
-                    console.error(
-                        `[euphire] Failed to restore ${disconnectedBotId} to the waiting room after manual disconnect:`,
-                        error
-                    );
-                }
-            }
-            if (!returnedToWaitingRoom && player) {
-                try {
-                    player.destroy();
-                } catch (error) {
-                    console.warn(
-                        `[euphire] Could not destroy disconnected player for ${disconnectedBotId}:`,
-                        error.message
-                    );
+                } finally {
+                    delete player._stoppingPlayer;
                 }
             }
             if (!coordinator.botSessions.get(disconnectedBotId)?.size) {
                 coordinator.markBotAvailable(disconnectedBotId);
             }
+            coordinator.updateStatusBoard(oldState.guild.id);
             return;
         }
 
@@ -325,36 +271,7 @@ module.exports = {
             console.log(`[euphire] Bot ${disconnectedBotId} moved from VC ${oldState.channelId} to ${newState.channelId}`);
             const targetClient = coordinator.getClient(disconnectedBotId) || client;
             const player = targetClient.riffy?.players?.get(oldState.guild.id);
-            const movedFromStandby =
-                player?._waitingRoom || player?._movingFromWaitingRoom;
-            if (!movedFromStandby) {
-                await coordinator.releaseBot(oldState.channelId, disconnectedBotId);
-            }
-            if (
-                player?._waitingRoom &&
-                require("../utils/waitingRoom").isWaitingRoomChannel(
-                    oldState.guild.id,
-                    newState.channelId
-                )
-            ) {
-                coordinator.markBotAvailable(disconnectedBotId);
-                return;
-            }
-            if (movedFromStandby) {
-                try {
-                    await require("../utils/guildBotProfile")
-                        .setGuildBotAvailability(
-                            targetClient,
-                            oldState.guild.id,
-                            false
-                        );
-                } catch (error) {
-                    console.error(
-                        `[euphire] Failed to remove the available label from ${disconnectedBotId} in guild ${oldState.guild.id}:`,
-                        error
-                    );
-                }
-            }
+            await coordinator.releaseBot(oldState.channelId, disconnectedBotId);
             const targetOwner = coordinator.resolveSessionOwner(
                 newState.channelId,
                 oldState.guild
@@ -376,8 +293,6 @@ module.exports = {
             await coordinator.markBotActive(disconnectedBotId, newState.channelId);
             if (player) {
                 player.voiceChannel = newState.channelId;
-                player._waitingRoom = false;
-                delete player._movingFromWaitingRoom;
             }
         }
     },

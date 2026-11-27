@@ -1,118 +1,108 @@
 const {
     ChannelType,
+    EmbedBuilder,
     MessageFlags,
     SlashCommandBuilder,
 } = require("discord.js");
 const { getGuildDataAsync, saveGuildData } = require("../utils/mongoGuildData");
-const { reconcileGuildWaitingRoom } = require("../utils/waitingRoom");
+const { updateGuildStatusBoard } = require("../utils/waitingRoom");
 const { isDeveloper } = require("../utils/developerAccess");
 
-function formatResults(results) {
-    const joined = results.filter(
-        (result) => result.status === "joined" || result.status === "already"
-    ).length;
-    const left = results.filter((result) => result.status === "left").length;
-    const busy = results.filter((result) => result.status === "busy").length;
-    const failures = results.filter((result) => result.status === "error");
-    const unavailable = results.filter(
-        (result) =>
-            result.status === "unavailable" ||
-            result.status === "not-in-room"
-    ).length;
-    return { joined, left, busy, failures, unavailable };
-}
+const STATUS_COLOR = 0x2b2d31;
 
 module.exports = {
     primaryOnly: true,
     data: new SlashCommandBuilder()
         .setName("waitingroom")
-        .setDescription("Configure Euphie's per-server waiting room (developer only)")
+        .setDescription("Manage Euphie's bot status board (developer only)")
         .addSubcommand((subcommand) =>
             subcommand
                 .setName("set")
-                .setDescription("Set this server's waiting room voice channel")
+                .setDescription("Choose the text channel for the status board")
                 .addChannelOption((option) =>
                     option
                         .setName("channel")
-                        .setDescription("Voice channel where available Euphie bots will wait")
-                        .addChannelTypes(ChannelType.GuildVoice)
+                        .setDescription("Text channel where bot status will be displayed")
+                        .addChannelTypes(
+                            ChannelType.GuildText,
+                            ChannelType.GuildAnnouncement
+                        )
                         .setRequired(true)
                 )
         )
         .addSubcommand((subcommand) =>
             subcommand
                 .setName("enable")
-                .setDescription("Enable the waiting room and send available bots there")
+                .setDescription("Post and update the bot status board")
         )
         .addSubcommand((subcommand) =>
             subcommand
                 .setName("disable")
-                .setDescription("Disable the waiting room and remove waiting bots")
+                .setDescription("Remove the status board without disconnecting active bots")
         )
         .addSubcommand((subcommand) =>
             subcommand
                 .setName("status")
-                .setDescription("Show this server's waiting room settings")
+                .setDescription("Show the status board settings")
         ),
 
     async execute(interaction) {
         if (!isDeveloper(interaction.user?.id)) {
             return interaction.reply({
-                content: "❌ You are not authorized to use this command.",
+                content: "You are not authorized to use this command.",
                 flags: MessageFlags.Ephemeral,
             });
         }
         if (!interaction.guild) {
             return interaction.reply({
-                content: "❌ This command can only be used in a server.",
-                flags: MessageFlags.Ephemeral,
-            });
-        }
-        if (!interaction.isChatInputCommand?.()) {
-            return interaction.reply({
-                content:
-                    "Use `/waitingroom set`, `/waitingroom enable`, `/waitingroom disable`, or `/waitingroom status`.",
+                content: "This command can only be used in a server.",
                 flags: MessageFlags.Ephemeral,
             });
         }
 
         const action = interaction.options.getSubcommand();
+        const data = await getGuildDataAsync(interaction.guildId);
+        const statusChannelId =
+            data.waitingRoomStatusTargetChannelId ||
+            data.waitingRoomStatusChannelId ||
+            data.waitingRoomChannelId;
+
         if (action === "status") {
-            const data = await getGuildDataAsync(interaction.guildId);
+            const channel = statusChannelId
+                ? interaction.guild.channels.cache.get(statusChannelId)
+                : null;
+            const embed = new EmbedBuilder()
+                .setColor(STATUS_COLOR)
+                .setAuthor({ name: "EUPHIE  /  CONFIGURATION" })
+                .setTitle("Bot status board")
+                .setDescription(
+                    `**State**\n${data.waitingRoomEnabled ? "ENABLED" : "DISABLED"}\n\n` +
+                        `**Channel**\n${channel ? `#${channel.name}` : "Not configured"}`
+                )
+                .setFooter({ text: "This board reports session status only; bots do not join a standby voice channel." });
             return interaction.reply({
-                content:
-                    `Euphie Waiting Room is **${data.waitingRoomEnabled ? "enabled" : "disabled"}**.` +
-                    (data.waitingRoomChannelId
-                        ? `\nChannel: <#${data.waitingRoomChannelId}>`
-                        : "\nNo channel has been set. Use `/waitingroom set` first."),
+                embeds: [embed],
                 flags: MessageFlags.Ephemeral,
+                allowedMentions: { parse: [] },
             });
         }
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const data = await getGuildDataAsync(interaction.guildId);
 
         if (action === "set") {
             const channel = interaction.options.getChannel("channel", true);
-            if (channel.type !== ChannelType.GuildVoice) {
-                return interaction.editReply({
-                    content: "❌ Choose a standard server voice channel.",
-                });
-            }
-            data.waitingRoomChannelId = channel.id;
+            data.waitingRoomStatusTargetChannelId = channel.id;
             await saveGuildData(interaction.guildId, data);
             if (!data.waitingRoomEnabled) {
-                return interaction.editReply({
-                    content:
-                        `✅ Euphie Waiting Room channel set to ${channel}. It is currently disabled; run \`/waitingroom enable\` to turn it on.`,
-                });
+                return interaction.editReply(
+                    `Status channel set to #${channel.name}. Run \`/waitingroom enable\` to post the board.`
+                );
             }
         } else if (action === "enable") {
-            if (!data.waitingRoomChannelId) {
-                return interaction.editReply({
-                    content:
-                        "❌ Set a voice channel first with `/waitingroom set`.",
-                });
+            if (!statusChannelId) {
+                return interaction.editReply(
+                    "Choose a text channel first with `/waitingroom set`."
+                );
             }
             data.waitingRoomEnabled = true;
             await saveGuildData(interaction.guildId, data);
@@ -120,30 +110,25 @@ module.exports = {
             data.waitingRoomEnabled = false;
             await saveGuildData(interaction.guildId, data);
         } else {
-            return interaction.editReply({
-                content: "❌ Unknown waiting room action.",
-            });
+            return interaction.editReply("Unknown status board action.");
         }
 
-        const results = await reconcileGuildWaitingRoom(interaction.guildId);
-        const summary = formatResults(results);
-        if (summary.failures.length) {
-            return interaction.editReply({
-                content:
-                    `Waiting room ${action === "disable" ? "disabled" : "updated"}; ` +
-                    `${summary.joined} bot(s) joined or were already there, ` +
-                    `${summary.busy} active bot(s) were left in their current channel, ` +
-                    `${summary.unavailable} bot(s) were not currently available.\n` +
-                    summary.failures
-                        .map(({ botId, error }) => `• ${botId}: ${error}`)
-                        .join("\n"),
-            });
+        try {
+            await updateGuildStatusBoard(interaction.guildId);
+        } catch (error) {
+            console.error(
+                `[euphire] Could not update the bot status board in guild ${interaction.guildId}:`,
+                error
+            );
+            return interaction.editReply(
+                `Settings were saved, but the status board could not be updated: ${error.message}`
+            );
         }
-        return interaction.editReply({
-            content:
-                action === "disable"
-                    ? `✅ Euphie Waiting Room disabled. ${summary.left} waiting bot(s) were removed; active sessions were left alone.`
-                    : `✅ Euphie Waiting Room ${action === "enable" ? "enabled" : "channel updated"}. ${summary.joined} bot(s) joined or were already there; ${summary.busy} active bot(s) stayed in their current channel.`,
-        });
+
+        return interaction.editReply(
+            action === "disable"
+                ? "The status board is disabled and its message was removed. Active playback was not changed."
+                : "The Euphie bot status board is ready."
+        );
     },
 };
