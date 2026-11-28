@@ -3,6 +3,7 @@ const { getDB, isDBConnected } = require("../utils/database");
 const { getGuildData } = require("../utils/mongoGuildData");
 const { startStatusMonitor } = require("../services/statusMonitor");
 const { DEVELOPER_IDS } = require("../utils/developerAccess");
+const config = require("../../config");
 const DEVELOPER_TEST_GUILD_ID = "1558416950726500415";
 const DEVELOPER_ROLE_NAME = "Euphie Administrator";
 
@@ -142,19 +143,25 @@ module.exports = {
                     require("../commands/waitingroom").data.toJSON(),
                     require("../commands/cancel-resumes").data.toJSON(),
                     require("../commands/testjockie").data.toJSON(),
+                    require("../commands/testbot").data.toJSON(),
                     ...require("../commands/model").commands.map((command) => command.data.toJSON()),
                 ]
                 : [];
             await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
             for (const guildId of client.guilds.cache.keys()) {
+                const guildCommands =
+                    client.botId === "euphie_main" &&
+                    guildId === config.testBotCommandGuildId
+                        ? [require("../commands/testbot").data.toJSON()]
+                        : [];
                 await rest.put(
                     Routes.applicationGuildCommands(client.user.id, guildId),
-                    { body: [] }
+                    { body: guildCommands }
                 );
             }
             console.log(
                 commands.length
-                    ? "[euphire] Registered the profile, announcement, cleanup, reset-stats, global-stats, administrator-role, waiting-room, resume-cancel, Jockie test, and model commands; cleared server-specific commands."
+                    ? "[euphire] Registered developer commands including /testbot; retained its server-specific test command and cleared other server-specific commands."
                     : "[euphire] Cleared global and server-specific slash commands for this secondary bot."
             );
         } catch (error) {

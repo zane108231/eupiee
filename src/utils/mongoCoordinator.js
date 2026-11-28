@@ -19,6 +19,7 @@ class MongoCoordinator {
         this.sessionGuilds = new Map(); // voiceChannelId -> guildId
         this.botSessions = new Map(); // botId -> Set<voiceChannelId>
         this.botStatus = new Map(); // botId -> status
+        this.developerTestBotSelections = new Map(); // guildId:userId -> botId
     }
 
     /**
@@ -286,6 +287,29 @@ class MongoCoordinator {
         return this.sessionOwners.get(voiceChannelId);
     }
 
+    getDeveloperTestBot(userId, guildId) {
+        if (!userId || !guildId) return null;
+        return this.developerTestBotSelections.get(
+            `${String(guildId)}:${String(userId)}`
+        ) || null;
+    }
+
+    setDeveloperTestBot(userId, guildId, botId) {
+        if (!userId || !guildId || !this.clients.has(botId)) return false;
+        this.developerTestBotSelections.set(
+            `${String(guildId)}:${String(userId)}`,
+            botId
+        );
+        return true;
+    }
+
+    clearDeveloperTestBot(userId, guildId) {
+        if (!userId || !guildId) return false;
+        return this.developerTestBotSelections.delete(
+            `${String(guildId)}:${String(userId)}`
+        );
+    }
+
     /**
      * Resolve session owner for a voice channel, with fallback to active bot voice states and players.
      */
@@ -523,7 +547,7 @@ class MongoCoordinator {
      * Supports both (botId, guildId, voiceChannelId, isMusicCommand)
      * and legacy (botId, voiceChannelId, isMusicCommand)
      */
-    shouldHandleCommand(botId, arg2, arg3, arg4) {
+    shouldHandleCommand(botId, arg2, arg3, arg4, userId = null) {
         let guildId = null;
         let voiceChannelId = null;
         let isMusicCommand = false;
@@ -553,6 +577,26 @@ class MongoCoordinator {
             const sessionOwner = this.resolveSessionOwner(voiceChannelId, guild);
             if (sessionOwner) {
                 return botId === sessionOwner;
+            }
+        }
+
+        // Developer test routing applies only when there is no existing session owner.
+        if (userId && guildId) {
+            const testBotId = this.getDeveloperTestBot(userId, guildId);
+            if (testBotId) {
+                const testClient = this.getClient(testBotId);
+                const isReady = !testClient?.isReady || testClient.isReady();
+                if (
+                    isReady &&
+                    testClient?.guilds?.cache?.has(guildId)
+                ) {
+                    return botId === testBotId;
+                }
+
+                this.clearDeveloperTestBot(userId, guildId);
+                console.warn(
+                    `[euphire] Cleared stale developer test-bot selection for ${userId} in guild ${guildId}`
+                );
             }
         }
 

@@ -42,15 +42,24 @@ function normalizeSpotifyUrl(query) {
 }
 
 function pickNode(riffy, node) {
-    if (node && typeof node !== "string" && node.rest) return node;
+    const isReady = (candidate) =>
+        Boolean(
+            candidate?.connected &&
+                (!riffy.readyNodeNames ||
+                    riffy.readyNodeNames.has(candidate.name))
+        );
+
+    if (node && typeof node !== "string" && node.rest && isReady(node)) {
+        return node;
+    }
     if (typeof node === "string") {
         const named = riffy.nodeMap.get(node);
-        if (named?.connected) return named;
+        if (isReady(named)) return named;
     }
     const main = riffy.nodeMap.get("Main");
-    if (main?.connected) return main;
+    if (isReady(main)) return main;
     const nodes = [...riffy.nodeMap.values()];
-    return nodes.find(n => n.connected) || nodes[0] || null;
+    return nodes.find(isReady) || null;
 }
 
 function hasTracks(response) {
@@ -575,7 +584,8 @@ function getSpotifyTrackFailureName(track) {
     ) {
         return null;
     }
-    return getSpotifyTrackDisplayName(track);
+    const { title, artist } = getSpotifyTrackDisplayParts(track);
+    return artist ? `${title} by ${artist}` : title;
 }
 
 function getTrackDisplayParts(track) {

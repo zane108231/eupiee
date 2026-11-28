@@ -1,6 +1,5 @@
 const { getGuildData, deleteGuildData } = require("../utils/mongoGuildData");
-const { createChatPlayIdleContainer } = require("../utils/components");
-const { EmbedBuilder, MessageFlags } = require("discord.js");
+const { EmbedBuilder } = require("discord.js");
 const { addSessionParticipant, removeSessionParticipant } = require("../utils/mongoStats");
 const coordinator = require("../utils/mongoCoordinator");
 const {
@@ -239,7 +238,11 @@ module.exports = {
                 return Boolean(otherPlayer?.voiceChannel);
             });
             if (!anotherActivePlayer) {
-                await resetChatPlayIfActive(targetClient, oldState.guild.id);
+                const guildData = getGuildData(oldState.guild.id);
+                if (guildData.playerMessageId && guildData.playerChannelId) {
+                    guildData.playerMessageId = null;
+                    guildData.playerChannelId = null;
+                }
             }
             if (player) {
                 player._stoppingPlayer = true;
@@ -297,28 +300,3 @@ module.exports = {
         }
     },
 };
-
-async function resetChatPlayIfActive(client, guildId) {
-    const guildData = getGuildData(guildId);
-    // Reset ChatPlay to idle
-    if (guildData.chatPlayChannelId && guildData.chatPlayMessageId) {
-        try {
-            const channel = client.channels.cache.get(guildData.chatPlayChannelId);
-            if (channel) {
-                const msg = await channel.messages.fetch(guildData.chatPlayMessageId);
-                await msg.edit({
-                    components: [createChatPlayIdleContainer()],
-                    attachments: [],
-                    flags: MessageFlags.IsComponentsV2,
-                });
-            }
-        } catch (err) {
-            // message may have been deleted
-        }
-    }
-    // Keep regular /play announcements in channel history.
-    else if (guildData.playerMessageId && guildData.playerChannelId) {
-        guildData.playerMessageId = null;
-        guildData.playerChannelId = null;
-    }
-}

@@ -1,4 +1,3 @@
-const { handleChatPlayMessage } = require("../handlers/chatPlayHandler");
 const { handlePrefixCommand } = require("../handlers/commandHandler");
 const { JOCKIE_BOT_IDS } = require("../utils/jockieBotIds");
 const { EmbedBuilder } = require("discord.js");
@@ -93,7 +92,5 @@ module.exports = {
         // console.log(`[euphire] Message received: bot=${client.botId}, content="${message.content}", author=${message.author.id}`);
 
         if (await handlePrefixCommand(client, message)) return;
-
-        await handleChatPlayMessage(client, message);
     },
 };

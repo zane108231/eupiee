@@ -2,6 +2,7 @@ const { EmbedBuilder, WebhookClient } = require("discord.js");
 const config = require("../../config");
 
 let webhookClient = null;
+const lavalinkNodeStates = new Map();
 
 function clip(value, limit = 1024) {
     const text = String(value ?? "Not available");
@@ -120,6 +121,102 @@ async function sendPlaybackFailureLog({
     }
 }
 
+async function sendLavalinkNodeStatus({
+    client,
+    node,
+    connected,
+    error = null,
+    migratedPlayers = 0,
+    migrationFailures = 0,
+}) {
+    if (!client || !node) return;
+
+    const state = connected ? "connected" : "disconnected";
+    const stateKey = `${client.botId || client.user?.id || "unknown"}:${node.name}`;
+    const previousState = lavalinkNodeStates.get(stateKey);
+    lavalinkNodeStates.set(stateKey, state);
+    if (previousState === state || (previousState === undefined && connected)) return;
+
+    let webhook;
+    try {
+        webhook = getWebhookClient();
+    } catch (initError) {
+        console.error("[euphire] Could not initialize Lavalink status webhook:", initError.message);
+        return;
+    }
+    if (!webhook) return;
+
+    const primaryNodeName = config.node.name || config.node.host;
+    const availableNodes = [...(client.riffy?.nodeMap?.values?.() || [])]
+        .filter(
+            (candidate) =>
+                candidate !== node &&
+                candidate.connected &&
+                (!client.riffy.readyNodeNames ||
+                    client.riffy.readyNodeNames.has(candidate.name))
+        )
+        .map((candidate) => candidate.name);
+    const nodeLabel = node.name || node.host || "Unknown";
+    const description = connected
+        ? node.name === primaryNodeName
+            ? `Primary node **${nodeLabel}** is online again. Active players have been moved back to it.`
+            : `Backup node **${nodeLabel}** is connected.`
+        : availableNodes.length
+          ? `Node **${nodeLabel}** is unavailable. Playback can use **${availableNodes.join(", ")}**.`
+          : `Node **${nodeLabel}** is unavailable and no other Lavalink nodes are connected.`;
+    const errorDetails = error
+        ? typeof error === "string"
+            ? error
+            : error.message || String(error)
+        : null;
+    const embed = new EmbedBuilder()
+        .setColor(connected ? 0x57f287 : availableNodes.length ? 0xf1c40f : 0xed4245)
+        .setTitle(connected ? "Lavalink Node Connected" : "Lavalink Node Disconnected")
+        .setDescription(clip(description, 4000))
+        .setTimestamp()
+        .addFields(
+            {
+                name: "Bot instance",
+                value: clip(client.botId || client.user?.id || "Unknown"),
+                inline: true,
+            },
+            { name: "Node", value: clip(nodeLabel), inline: true },
+            ...(connected && node.name === primaryNodeName
+                ? [
+                      {
+                          name: "Players returned to primary",
+                          value: String(migratedPlayers),
+                          inline: true,
+                      },
+                      ...(migrationFailures
+                          ? [
+                                {
+                                    name: "Player migrations failed",
+                                    value: String(migrationFailures),
+                                    inline: true,
+                                },
+                            ]
+                          : []),
+                  ]
+                : []),
+            ...(errorDetails
+                ? [{ name: "Details", value: clip(errorDetails), inline: false }]
+                : [])
+        );
+
+    try {
+        await webhook.send({
+            embeds: [embed],
+            allowedMentions: { parse: [] },
+        });
+    } catch (sendError) {
+        console.error(
+            "[euphire] Failed to send Lavalink status to status webhook:",
+            sendError.message
+        );
+    }
+}
+
 function startStatusMonitor() {
     if (!config.statusWebhookUrl) {
         console.warn("[euphire] STATUS_WEBHOOK_URL not set — playback failure logging disabled.");
@@ -140,4 +237,5 @@ function startStatusMonitor() {
 module.exports = {
     startStatusMonitor,
     sendPlaybackFailureLog,
+    sendLavalinkNodeStatus,
 };

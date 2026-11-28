@@ -40,6 +40,14 @@ module.exports = {
             return;
         }
 
+        if (
+            interaction.isStringSelectMenu() &&
+            interaction.customId?.startsWith("testbot:select:")
+        ) {
+            await require("../commands/testbot").handleSelection(interaction);
+            return;
+        }
+
         // Handle slash commands
         if (interaction.isChatInputCommand()) {
             const command = client.commands.get(interaction.commandName);

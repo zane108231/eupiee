@@ -16,9 +16,11 @@ const {
 } = require("../utils/playback");
 const { getHumanVoiceMembers } = require("../utils/voiceMembers");
 const { resetSessionPermissions } = require("../utils/permissions");
+const { handleQueueLoopTrackEnd } = require("../utils/queueLoop");
 const { startSession, updateSessionProgress, endSession, addSessionParticipant, removeSessionParticipant } = require("../utils/mongoStats");
 const { startPlayerTracking, stopPlayerTracking } = require("../utils/modelMilestones");
 const { updateNowPlaying, scrobble } = require("../utils/lastfm");
+const { sendLavalinkNodeStatus } = require("../services/statusMonitor");
 const {
     getSpotifyTrackDisplayName,
     getSpotifyTrackDisplayParts,
@@ -154,7 +156,6 @@ async function editOrSendPlayerMessage(client, guildData, channelId, container, 
     const channel = client.channels.cache.get(channelId);
     if (!channel) {
         // Channel no longer exists; clear stale IDs
-        guildData.chatPlayMessageId = null;
         guildData.playerMessageId = null;
         guildData.playerChannelId = null;
         return;
@@ -180,7 +181,6 @@ async function editOrSendPlayerMessage(client, guildData, channelId, container, 
             }
             // Message or channel no longer exists — clear stale IDs and send a new one
             console.log(`[euphire] Clearing stale player message ID and sending new message`);
-            guildData.chatPlayMessageId = null;
             guildData.playerMessageId = null;
             guildData.playerChannelId = null;
             guildData.updateInterval && clearInterval(guildData.updateInterval);
@@ -301,31 +301,6 @@ function shouldAnnounceTrackStart(player, track) {
     return !isRepeatedTrackLoop;
 }
 
-function isQueueLoopRestart(player, track, payload) {
-    if (
-        player?.loop !== "queue" ||
-        player._clearQueueRequested ||
-        String(payload?.reason || "").toLowerCase() !== "finished" ||
-        !track
-    ) {
-        return false;
-    }
-
-    const queuedTracks = Array.from(player.queue || []);
-    if (!queuedTracks.length) return false;
-
-    if (!(player._queueLoopPlayedTracks instanceof Set)) {
-        player._queueLoopPlayedTracks = new Set();
-    }
-    player._queueLoopPlayedTracks.add(track);
-
-    const cycleFinished = queuedTracks.every((queuedTrack) =>
-        player._queueLoopPlayedTracks.has(queuedTrack)
-    );
-    if (cycleFinished) player._queueLoopPlayedTracks.clear();
-    return cycleFinished;
-}
-
 async function sendNowPlayingPayload(channel, client, player, track) {
     try {
         return await channel.send({
@@ -390,22 +365,6 @@ async function announceNowPlaying(client, player, track, guildData) {
     guildData.playerMessageId = newMsg.id;
     guildData.playerChannelId = channel.id;
     guildData.cannotSendPlayer = false;
-
-    if (guildData.chatPlayChannelId && guildData.chatPlayMessageId) {
-        try {
-            const chatChannel = client.channels.cache.get(guildData.chatPlayChannelId);
-            const chatContainer = createChatPlayNowPlayingContainer(track, player, guildData, null);
-            if (chatChannel && guildData.chatPlayMessageId !== newMsg.id) {
-                const chatMsg = await chatChannel.messages.fetch(guildData.chatPlayMessageId);
-                await chatMsg.edit({
-                    components: [chatContainer],
-                    flags: MessageFlags.IsComponentsV2,
-                });
-            }
-        } catch {
-            // ChatPlay panel is optional; the public now-playing already posted
-        }
-    }
 }
 
 /**
@@ -444,24 +403,79 @@ function setupPlayerHandler(client) {
         }
     })();
     // --- Node Connected ---
-    client.riffy.on("nodeConnect", (node) => {
+    client.riffy.on("nodeConnect", async (node) => {
         console.log(`[euphire] Lavalink node "${node.name}" connected.`);
+        client.riffy.readyNodeNames.add(node.name);
+        const primaryNodeName = config.node.name || config.node.host;
+        let migratedPlayers = 0;
+        let migrationFailures = 0;
+
+        const playersToMove = [...client.riffy.players.values()].filter(
+            (player) =>
+                player.node !== node &&
+                (node.name === primaryNodeName ||
+                    !client.riffy.readyNodeNames.has(player.node.name))
+        );
+        const results = await Promise.allSettled(
+            playersToMove.map((player) => client.riffy.migrate(player, node))
+        );
+
+        for (const result of results) {
+            if (result.status === "fulfilled") {
+                migratedPlayers += 1;
+            } else {
+                migrationFailures += 1;
+                console.error(
+                    `[euphire] Could not move a player to ready Lavalink node "${node.name}":`,
+                    result.reason
+                );
+            }
+        }
+
+        await sendLavalinkNodeStatus({
+            client,
+            node,
+            connected: true,
+            migratedPlayers,
+            migrationFailures,
+        });
     });
 
     // --- Node Error ---
     client.riffy.on("nodeError", (node, error) => {
+        client.riffy.readyNodeNames.delete(node.name);
         console.error(`[euphire] Node "${node.name}" error:`, error.message);
         recordIncident("Lavalink", `Node error: ${error.message.substring(0, 50)}`);
+        void sendLavalinkNodeStatus({
+            client,
+            node,
+            connected: false,
+            error,
+        });
     });
 
     client.riffy.on("nodeDestroy", (node) => {
+        client.riffy.readyNodeNames.delete(node.name);
         console.warn(`[euphire] Node "${node.name}" was removed.`);
+        void sendLavalinkNodeStatus({
+            client,
+            node,
+            connected: false,
+            error: "Riffy removed this node from its active connection map.",
+        });
     });
 
     // --- Node Disconnect ---
-    client.riffy.on("nodeDisconnect", (node) => {
+    client.riffy.on("nodeDisconnect", (node, details) => {
+        client.riffy.readyNodeNames.delete(node.name);
         console.warn(`[euphire] Node "${node.name}" disconnected.`);
         recordIncident("Lavalink", "Node disconnected");
+        void sendLavalinkNodeStatus({
+            client,
+            node,
+            connected: false,
+            error: details?.reason || details?.event || null,
+        });
     });
 
     // --- Node Reconnected (Riffy built-in auto-reconnect) ---
@@ -708,11 +722,16 @@ function setupPlayerHandler(client) {
     client.riffy.on("trackEnd", async (player, track, payload) => {
         try {
             const guildData = getGuildData(player.guildId);
-            const queueRestarting = isQueueLoopRestart(player, track, payload);
+            const queueLoopUpdate = handleQueueLoopTrackEnd(
+                player,
+                track,
+                payload
+            );
+            const queueRestarting = queueLoopUpdate.restarted;
             await stopPlayerTracking(player, true);
 
             console.log("[euphire] trackEnd event fired for track:", track?.info?.title);
-            let queueUpdated = false;
+            let queueUpdated = queueLoopUpdate.updated;
             if (
                 guildData.removeAfterPlayed &&
                 player.loop !== "queue" &&
@@ -955,28 +974,10 @@ function setupPlayerHandler(client) {
                 });
             setPlayerIdleTimeout(client, player, guildData, "idle");
 
-            // If this is a ChatPlay session, edit the message to idle state
-            if (guildData.chatPlayChannelId && guildData.chatPlayMessageId) {
-                const container = createChatPlayIdleContainer();
-                const channel = client.channels.cache.get(guildData.chatPlayChannelId);
-                if (channel) {
-                    try {
-                        const msg = await channel.messages.fetch(guildData.chatPlayMessageId);
-                        await msg.edit({
-                            components: [container],
-                            attachments: [],
-                            flags: MessageFlags.IsComponentsV2,
-                        });
-                    } catch (err) {
-                        // message deleted
-                    }
-                }
-            } else {
-                // Keep the started-playing announcement in channel history.
-                player.playerMessageId = null;
-                if (assignedChannel && guildData.playerChannelId === assignedChannel.id) {
-                    guildData.playerMessageId = null;
-                }
+            // Keep the started-playing announcement in channel history.
+            player.playerMessageId = null;
+            if (assignedChannel && guildData.playerChannelId === assignedChannel.id) {
+                guildData.playerMessageId = null;
             }
 
             if (assignedChannel) {
@@ -1187,5 +1188,4 @@ module.exports = {
     startVoiceChannelMonitoring,
     stopVoiceChannelMonitoring,
     shouldAnnounceTrackStart,
-    isQueueLoopRestart,
 };

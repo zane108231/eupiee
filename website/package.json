@@ -1,0 +1,12 @@
+{
+  "name": "euphire-website",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone website and invite directory for Euphie Discord music bots",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

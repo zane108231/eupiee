@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, MessageFlags } = require("discord.js");
 const { resolveTracks, getSpotifyTrackUrl } = require("../utils/search");
 const { createSearch } = require("../utils/spotifyCatalogSelection");
+const { createErrorEmbed } = require("../utils/components");
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -59,7 +60,7 @@ module.exports = {
             }));
             if (!tracks.length) {
                 return interaction.editReply({
-                    content: `No Spotify tracks found for **${query}**.`,
+                    embeds: [createErrorEmbed("No results ⛔")],
                     components: [],
                 });
             }
@@ -72,8 +73,11 @@ module.exports = {
         } catch (error) {
             console.error("[euphire] Spotify track search failed:", error);
             return interaction.editReply({
-                content:
-                    "Spotify track search is temporarily unavailable. Please try again later.",
+                embeds: [
+                    createErrorEmbed(
+                        "Spotify track search is temporarily unavailable. Please try again later."
+                    ),
+                ],
                 components: [],
             });
         }

@@ -5,12 +5,13 @@
 
 ## euphire
 
-euphire is a ChatPlay-focused Discord music bot that also operates like a standard music bot. It is easy to self-host with Docker, or [click here to invite the bot](https://discord.com/oauth2/authorize?client_id=1502977716196999309) and start using it today with no hosting or setup required.
+euphire is a Discord music bot with queue management, multi-guild Lavalink support, and automatic failover. It is easy to self-host with Docker, or [click here to invite the bot](https://discord.com/oauth2/authorize?client_id=1502977716196999309) and start using it today with no hosting or setup required.
 
 ## Features & Commands
 
-- ChatPlay-powered interactions for conversational bot control
 - Standard music playback with multi-guild Lavalink support
+- Automatic Lavalink backup failover, with active players moved back to the primary node when it reconnects
+- Lavalink connection changes are logged to `STATUS_WEBHOOK_URL`; set `LAVALINK_BACKUP_PASSWORD` in the deployment environment to override the backup node's default credential
 - Supports queue management, shuffle, seek, volume, loop, and now playing
 - Built-in commands for help, bot stats, and track information
 - Server-local Euphie model milestone after 100 hours of active listening (`/modelstats`, `/modelchannel`, and `/setmodel`; bot-owner only); `/botprofile copy` and `/botprofile reset` manage the server-specific profile, the current model can upload an avatar with `/modelprofile`, and the developer can configure profiles with `/developerprofile`

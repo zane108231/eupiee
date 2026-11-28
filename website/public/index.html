@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#080a10">
+    <meta name="description" content="Euphie Music — up to six dedicated Discord music bots acting as one. Invite your favorite Euphie and bring your community together through music.">
+    <title>Euphie Music — six bots, one crew</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="navbar">
+      <div class="nav-inner">
+        <a class="brand" href="#top" aria-label="Euphie Music home">
+          <img class="brand-logo" src="/bots/euphie.jpg" alt="">
+          <span class="brand-name">euphie<span class="brand-dot">.</span>music</span>
+        </a>
+        <nav class="nav-links" id="nav-links" aria-label="Main navigation">
+          <a href="#features">Features</a>
+          <a href="#bots">The Crew</a>
+          <a href="#demo">In Action</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <div class="nav-actions">
+          <a class="btn btn-primary btn-sm nav-cta" href="#bots">Add to Discord</a>
+          <button class="nav-toggle" id="nav-toggle" aria-label="Toggle menu" aria-expanded="false">
+            <span></span><span></span><span></span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main id="top">
+      <!-- Hero -->
+      <section class="hero">
+        <div class="hero-bg" aria-hidden="true">
+          <div class="hero-glow hero-glow-a"></div>
+          <div class="hero-glow hero-glow-b"></div>
+          <div class="hero-grid"></div>
+        </div>
+        <div class="container hero-inner">
+          <div class="hero-badge reveal"><span class="pulse"></span> Six bots &middot; one crew &middot; always on</div>
+          <h1 class="reveal d1">Your server's music,<br><span class="grad-text">handled by a crew.</span></h1>
+          <p class="hero-sub reveal d2">Euphie Music is six dedicated Discord bots working as one — queues and automatic failover across every voice channel. One prefix. Zero skipped songs.</p>
+          <div class="hero-actions reveal d3">
+            <a class="btn btn-primary btn-lg" href="#bots">Invite the crew</a>
+            <a class="btn btn-ghost btn-lg" href="#features">Explore features</a>
+          </div>
+          <div class="hero-avatars reveal d4" id="hero-avatars" aria-hidden="true"></div>
+        </div>
+        <div class="container reveal d5">
+          <div class="banner-frame">
+            <img class="hero-banner" src="/bots/banner.jpg" alt="Euphie Music banner art">
+          </div>
+        </div>
+      </section>
+
+      <!-- Marquee -->
+      <div class="marquee" aria-hidden="true">
+        <div class="marquee-track">
+          <span>Music playback</span><i>✦</i><span>Auto-failover</span><i>✦</i><span>Queue controls</span><i>✦</i><span>One prefix</span><i>✦</i><span>Six bots</span><i>✦</i>
+          <span>Music playback</span><i>✦</i><span>Auto-failover</span><i>✦</i><span>Queue controls</span><i>✦</i><span>One prefix</span><i>✦</i><span>Six bots</span><i>✦</i>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <section class="stats">
+        <div class="container stats-grid">
+          <div class="stat reveal"><strong>6</strong><span>dedicated bots</span></div>
+          <div class="stat reveal d1"><strong>1</strong><span>command prefix</span></div>
+          <div class="stat reveal d2"><strong>&infin;</strong><span>queues at once</span></div>
+          <div class="stat reveal d3"><strong>24/7</strong><span>always listening</span></div>
+        </div>
+      </section>
+
+      <!-- Features -->
+      <section class="section" id="features">
+        <div class="container">
+          <div class="section-head reveal">
+            <span class="eyebrow">Features</span>
+            <h2>Everything you need.<br><span class="grad-text">Nothing you don't.</span></h2>
+            <p>Euphie handles the music so your community can just enjoy it.</p>
+          </div>
+          <div class="feature-grid">
+            <article class="card feature-card reveal">
+              <div class="card-icon">♫</div>
+              <h3>Full music playback</h3>
+              <p>Play tracks, playlists, and albums from all the usual sources. Queue management, skip, pause, loop, and volume — all with <code>e!</code>.</p>
+              <span class="card-arrow" aria-hidden="true">→</span>
+            </article>
+            <article class="card feature-card reveal d1">
+              <div class="card-icon">⇄</div>
+              <h3>Auto-failover crew</h3>
+              <p>When one Euphie is busy, the next one in line joins your voice channel automatically. Six bots means six channels of music at once.</p>
+              <span class="card-arrow" aria-hidden="true">→</span>
+            </article>
+            <article class="card feature-card reveal">
+              <div class="card-icon">≣</div>
+              <h3>Queue controls</h3>
+              <p>See what's coming up, reorder the queue, save favorites, and keep the night going without missing a beat.</p>
+              <span class="card-arrow" aria-hidden="true">→</span>
+            </article>
+            <article class="card feature-card reveal d1">
+              <div class="card-icon">◉</div>
+              <h3>One prefix to rule them all</h3>
+              <p>No more remembering different prefixes per bot. Every Euphie answers to <code>e!</code> — simple and consistent.</p>
+              <span class="card-arrow" aria-hidden="true">→</span>
+            </article>
+            <article class="card feature-card reveal d2">
+              <div class="card-icon">♥</div>
+              <h3>Built for communities</h3>
+              <p>Made for study sessions, gaming nights, watch parties, and everything in between. Music that brings people together.</p>
+              <span class="card-arrow" aria-hidden="true">→</span>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- The Crew -->
+      <section class="section section-alt" id="bots">
+        <div class="container">
+          <div class="section-head reveal">
+            <span class="eyebrow">The Crew</span>
+            <h2>Pick your favorite Euphie,<br><span class="grad-text">or take them all.</span></h2>
+            <p>Each bot is its own Discord account with its own invite. Add one or add six — the crew handles the rest.</p>
+          </div>
+          <div class="crew-count reveal" id="bot-count">Loading the crew…</div>
+          <div class="crew-grid" id="bot-grid" aria-live="polite">
+            <div class="card loading-card">Tuning the crew…</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Demo -->
+      <section class="section" id="demo">
+        <div class="container demo-inner">
+          <div class="demo-copy reveal">
+            <span class="eyebrow">See it in action</span>
+            <h2>Six bots.<br><span class="grad-text">One queue.</span></h2>
+            <p>Start a session in any voice channel — Euphie joins, plays your song, and manages the queue while the rest of the crew stays ready for the next channel.</p>
+            <ul class="demo-list">
+              <li><strong>e!play</strong> — drop a link or search a song</li>
+              <li><strong>e!queue</strong> — see what's coming up next</li>
+              <li><strong>e!skip / e!pause / e!loop</strong> — full control</li>
+            </ul>
+            <a class="btn btn-primary" href="#bots">Get started</a>
+          </div>
+          <div class="discord-mock reveal d1" aria-hidden="true">
+            <div class="mock-titlebar">
+              <span class="mock-dots"><i></i><i></i><i></i></span>
+              <span class="mock-channel"># music-chat</span>
+            </div>
+            <div class="mock-body">
+              <div class="mock-msg">
+                <img class="mock-avatar" src="/bots/euphie-1.png" alt="">
+                <div><div class="mock-head"><strong>you</strong><span class="mock-time">today at 9:41 PM</span></div>
+                  <p>e!play never gonna give you up</p></div>
+              </div>
+              <div class="mock-msg bot">
+                <img class="mock-avatar" src="/bots/euphie.jpg" alt="">
+                <div><div class="mock-head"><strong>Euphie <span class="mock-tag">APP</span></strong><span class="mock-time">today at 9:41 PM</span></div>
+                  <p>Now playing: <em>Never Gonna Give You Up</em> — Rick Astley</p>
+                  <p class="mock-sub">Added to queue · 3 songs waiting</p></div>
+              </div>
+              <div class="mock-msg">
+                <img class="mock-avatar" src="/bots/euphie-2.png" alt="">
+                <div><div class="mock-head"><strong>friend</strong><span class="mock-time">today at 9:42 PM</span></div>
+                  <p>e!queue</p></div>
+              </div>
+              <div class="mock-msg bot">
+                <img class="mock-avatar" src="/bots/euphie.jpg" alt="">
+                <div><div class="mock-head"><strong>Euphie <span class="mock-tag">APP</span></strong><span class="mock-time">today at 9:42 PM</span></div>
+                  <p>Queue — 1. Never Gonna Give You Up · 2. Levitating · 3. Blinding Lights</p></div>
+              </div>
+            </div>
+            <div class="mock-input"><span>Message #music-chat</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- FAQ -->
+      <section class="section section-alt" id="faq">
+        <div class="container faq-wrap">
+          <div class="section-head reveal">
+            <span class="eyebrow">FAQ</span>
+            <h2>Good to <span class="grad-text">know.</span></h2>
+          </div>
+          <div class="faq-list">
+            <details class="reveal">
+              <summary>How do I add Euphie to my server?<span class="faq-icon">+</span></summary>
+              <p>Pick an Euphie from the crew above, select your server in Discord's authorization screen, and approve the permissions. You'll need the Manage Server permission.</p>
+            </details>
+            <details class="reveal d1">
+              <summary>How do I start playing music?<span class="faq-icon">+</span></summary>
+              <p>Join a voice channel and use <code>e!play</code> followed by a song or playlist. Run <code>e!help</code> in Discord for the full command list.</p>
+            </details>
+            <details class="reveal d2">
+              <summary>Why would I want more than one Euphie?<span class="faq-icon">+</span></summary>
+              <p>Each Euphie is a separate bot account — up to six voice channels can play music at once, and if one is busy the next one steps in automatically.</p>
+            </details>
+            <details class="reveal d3">
+              <summary>Do the bots share a queue?<span class="faq-icon">+</span></summary>
+              <p>Each bot manages its own session in its voice channel, while the crew coordinates so there's always an Euphie ready to play.</p>
+            </details>
+            <details class="reveal d4">
+              <summary>Is Euphie Music free?<span class="faq-icon">+</span></summary>
+              <p>Yes — inviting and using the bots is free. Support the project through the support server if you'd like.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <section class="cta">
+        <div class="cta-bg" aria-hidden="true"></div>
+        <div class="container cta-inner reveal">
+          <h2>Ready to start<br><span class="grad-text">the music?</span></h2>
+          <p>Join the servers already playing with Euphie.</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary btn-lg" href="#bots">Invite a Euphie</a>
+            <a class="btn btn-ghost btn-lg" href="https://discord.gg/mCCyM8Msxm" target="_blank" rel="noopener noreferrer">Join support server</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="#top">
+            <img class="brand-logo" src="/bots/euphie.jpg" alt="">
+            <span class="brand-name">euphie<span class="brand-dot">.</span>music</span>
+          </a>
+          <p>Six dedicated Discord music bots working as one crew.</p>
+        </div>
+        <div class="footer-col">
+          <h4>The Crew</h4>
+          <a href="#bots">Invite bots</a>
+          <a href="#features">Features</a>
+          <a href="#demo">Commands</a>
+        </div>
+        <div class="footer-col">
+          <h4>Community</h4>
+          <a href="https://discord.gg/mCCyM8Msxm" target="_blank" rel="noopener noreferrer">Support server</a>
+          <a href="https://github.com/zane108231/eupiee" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </div>
+        <div class="footer-col">
+          <h4>Legal</h4>
+          <a href="#faq">FAQ</a>
+          <a href="#top">Privacy</a>
+          <a href="#top">Terms</a>
+        </div>
+      </div>
+      <div class="container footer-bottom">
+        <span>© <span id="year"></span> Euphie Music — All rights reserved.</span>
+        <span>Euphie Music is not affiliated with Discord Inc.</span>
+      </div>
+    </footer>
+    <div class="site-message" id="site-message" role="status" hidden></div>
+  </body>
+</html>

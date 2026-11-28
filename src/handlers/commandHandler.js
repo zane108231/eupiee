@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { Collection } = require("discord.js");
+const { createErrorEmbed } = require("../utils/components");
 const { PREFIX, createPrefixInteraction } = require("../utils/prefix");
 const { getPrefix, getAllValidPrefixes } = require("../utils/prefixStore");
 const coordinator = require("../utils/mongoCoordinator");
@@ -128,7 +129,7 @@ function resolveCommand(client, name) {
 
 /**
  * Run a prefix command from a guild message. Returns true if the message
- * started with the prefix (so ChatPlay should not steal it).
+ * started with the prefix so it is handled as a command.
  */
 async function handlePrefixCommand(client, message) {
     if (!message.guild || message.author.bot) return false;
@@ -213,6 +214,7 @@ async function handlePrefixCommand(client, message) {
     ) {
         return true;
     }
+    if (command?.slashOnly) return true;
 
     const shouldHandle = command?.primaryOnly
         ? true
@@ -220,7 +222,8 @@ async function handlePrefixCommand(client, message) {
               botId,
               guildId,
               voiceChannelId,
-              isMusic
+              isMusic,
+              message.author.id
           );
     // console.log(`[euphire] Command routing: bot=${botId}, guild=${guildId}, command=${command?.data?.name || rawName}, voiceChannel=${voiceChannelId}, shouldHandle=${shouldHandle}, isMusic=${isMusic}`);
 
@@ -231,6 +234,29 @@ async function handlePrefixCommand(client, message) {
 
     if (!command) {
         // Silently ignore unknown commands
+        return true;
+    }
+
+    const testBotId = isMusic
+        ? coordinator.getDeveloperTestBot(message.author.id, guildId)
+        : null;
+    if (
+        testBotId === botId &&
+        voiceChannelId &&
+        !coordinator.getSessionOwner(voiceChannelId) &&
+        !coordinator.isBotAvailable(botId, guildId)
+    ) {
+        const botLabel =
+            coordinator.botConfigs.find((bot) => bot.id === botId)?.name ||
+            botId;
+        const interaction = createPrefixInteraction(message, command, args);
+        await interaction.reply({
+            embeds: [
+                createErrorEmbed(
+                    `${botLabel} is already in use in another voice channel in this server. End that session or choose another test bot with \`/testbot\`.`
+                ),
+            ],
+        });
         return true;
     }
 
@@ -247,9 +273,13 @@ async function handlePrefixCommand(client, message) {
             console.error(`[euphire] Prefix command error (${command.data.name}):`, error);
             try {
                 if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp({ content: "An error occurred." });
+                    await interaction.followUp({
+                        embeds: [createErrorEmbed("An error occurred.")],
+                    });
                 } else {
-                    await interaction.reply({ content: "An error occurred." });
+                    await interaction.reply({
+                        embeds: [createErrorEmbed("An error occurred.")],
+                    });
                 }
             } catch {
                 // ignore

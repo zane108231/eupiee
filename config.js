@@ -8,8 +8,16 @@ module.exports = {
         secure: false,
         name: "Main",
     },
+    backupNode: {
+        host: "lavalink.jirayu.net",                                
+        // Leave password unset to use Riffy's built-in Lavalink default.
+        port: 13592,
+        secure: false,
+        name: "Backup",
+    },
 
     prefix: "e!",
+    testBotCommandGuildId: "1501116811826036858",
 
     defaultSearchPlatform: "spsearch",
     restVersion: "v4",

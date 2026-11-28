@@ -84,9 +84,9 @@ module.exports = {
         // Apply new loop state
         player.setLoop(newMode);
         if (newMode === "queue") {
-            player._queueLoopPlayedTracks = new Set();
+            player._queueLoopRepeatTracks = [];
         } else {
-            delete player._queueLoopPlayedTracks;
+            delete player._queueLoopRepeatTracks;
         }
         guildData.loop = newMode;
         await saveGuildData(guildId, guildData);

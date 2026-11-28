@@ -266,10 +266,13 @@ async function writePlayerSnapshot(client, player) {
     const queue = Array.from(player.queue || [])
         .map((track) => serializeTrack(track))
         .filter(Boolean);
+    const loopQueueRepeat = Array.from(player._queueLoopRepeatTracks || [])
+        .map((track) => serializeTrack(track))
+        .filter(Boolean);
     const current =
         player.playing || player.paused ? serializeTrack(player.current) : null;
 
-    if (!current && queue.length === 0) {
+    if (!current && queue.length === 0 && loopQueueRepeat.length === 0) {
         cancelledResumeSnapshots.delete(
             getResumeSnapshotKey({ guildId: player.guildId, botId: client.botId })
         );
@@ -289,6 +292,7 @@ async function writePlayerSnapshot(client, player) {
             null,
         currentTrack: current,
         queue,
+        loopQueueRepeat,
         loopMode: normalizeLoopMode(player.loop),
         positionMs: Math.max(
             0,
@@ -585,6 +589,7 @@ async function prepareSnapshot(client, snapshot) {
         normalizeLoopMode(snapshot.loopMode ?? guildData.loop)
     );
     player.queue.clear();
+    player._queueLoopRepeatTracks = [];
 
     const tracksToRestore = [
         snapshot.currentTrack,
@@ -624,7 +629,33 @@ async function prepareSnapshot(client, snapshot) {
     for (const track of resolvedTracks) {
         player.queue.add(track);
     }
+    if (player.loop === "queue" && Array.isArray(snapshot.loopQueueRepeat)) {
+        for (const savedTrack of snapshot.loopQueueRepeat) {
+            try {
+                const track = await resolveSavedTrack(client, savedTrack);
+                if (track) {
+                    player._queueLoopRepeatTracks.push(track);
+                } else {
+                    console.warn(
+                        `[euphire] Could not resolve saved repeat track "${savedTrack.title}" in guild ${snapshot.guildId}`
+                    );
+                }
+            } catch (error) {
+                console.error(
+                    `[euphire] Failed to resolve saved repeat track "${savedTrack.title}" in guild ${snapshot.guildId}:`,
+                    error.message
+                );
+            }
+        }
+    }
     player._restoringSession = false;
+
+    if (resolvedTracks.length === 0 && player._queueLoopRepeatTracks.length) {
+        for (const track of player._queueLoopRepeatTracks) {
+            player.queue.add(track);
+        }
+        player._queueLoopRepeatTracks = [];
+    }
 
     if (resolvedTracks.length === 0) {
         await removeSavedSession(

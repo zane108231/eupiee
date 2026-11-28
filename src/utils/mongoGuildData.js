@@ -48,8 +48,6 @@ function createDefaultGuildData() {
         queueEndTime: null,
         currentSessionId: null,
         leaveAfterQueueEnd: false,
-        chatPlayChannelId: null,
-        chatPlayMessageId: null,
         prefix: 'e!',
         queue: [],
         createdAt: Date.now(),

@@ -71,7 +71,7 @@ function catchRest(promise) {
 }
 
 function getConnectedNode(riffy) {
-    return [...riffy.nodeMap.values()].find((node) => node.connected) || null;
+    return riffy.leastUsedNodes[0] || null;
 }
 
 async function waitForNode(riffy, timeoutMs = 10000) {

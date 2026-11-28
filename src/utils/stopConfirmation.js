@@ -5,9 +5,9 @@ function createStopConfirmationPayload() {
     const embed = new EmbedBuilder()
         .setColor(0x5865f2)
         .setDescription(
-            "Thanks for listening to Euphie!\n\n" +
-                "**Enjoying the bot?**\n" +
-                "Join our [Discord server](https://discord.gg/mCCyM8Msxm) to support Euphie, get help, and follow future updates. ❤️"
+            "Thank you for using our service!\n\n" +
+                "Come join our [support server](https://discord.gg/mCCyM8Msxm) to get information about updates, issues and for discussions about bot features!\n\n" +
+                "Your suggestions and opinions are always considered!"
         )
         .setImage("attachment://euphie-banner.png");
 

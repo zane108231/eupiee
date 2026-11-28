@@ -1,6 +1,6 @@
 const { MessageFlags, AttachmentBuilder } = require("discord.js");
 const { getGuildData, saveGuildData, clearUpdateInterval } = require("../utils/mongoGuildData");
-const { createNowPlayingContainer, createChatPlayNowPlayingContainer, createQueueContainer, createChatPlayIdleContainer } = require("../utils/components");
+const { createNowPlayingContainer, createQueueContainer } = require("../utils/components");
 const { generateMusicCard } = require("../utils/musicard");
 const { addNodeDetails } = require("../utils/nodeDetails");
 const { canControlMusic, canUseMusicAction, denyMusicMessage, VOICE_CHANNEL_DENIAL } = require("../utils/permissions");
@@ -156,26 +156,6 @@ async function handleButtonInteraction(client, interaction) {
     }
     const guildData = getGuildData(guildId);
 
-    // If no player exists but ChatPlay was active, try to recreate it
-    if (!player && guildData.chatPlayChannelId && guildData.chatPlayEnabled) {
-        const voiceChannel = interaction.member?.voice?.channel;
-        if (voiceChannel) {
-            try {
-                player = targetRiffy.createConnection({
-                    guildId: guildId,
-                    voiceChannel: voiceChannel.id,
-                    textChannel: guildData.chatPlayChannelId,
-                    deaf: true,
-                });
-                // Restore volume
-                player.volume = guildData.volume;
-                console.log(`[euphire] Recreated player for guild ${guildId} after restart`);
-            } catch (err) {
-                console.error(`[euphire] Failed to recreate player for guild ${guildId}:`, err.message);
-            }
-        }
-    }
-
     // Handle status back button - return to main status view
     if (interaction.isButton() && interaction.customId === "status_back") {
         await interaction.deferUpdate();
@@ -293,7 +273,7 @@ async function handleButtonInteraction(client, interaction) {
     // Handle song suggestion select menu
     if (interaction.isStringSelectMenu() && interaction.customId === "song_suggestion") {
         if (!player) {
-            return interaction.reply({ content: `❌ No music playing. Start with ${getCmd("play")} or ChatPlay!`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: `❌ No music playing. Start with ${getCmd("play")}.`, flags: MessageFlags.Ephemeral });
         }
         if (!canControlMusic(interaction.member, player)) {
             return interaction.reply({ content: VOICE_CHANNEL_DENIAL, flags: MessageFlags.Ephemeral });
@@ -330,7 +310,7 @@ async function handleButtonInteraction(client, interaction) {
     // Queue button opens the queue UI
     if (customId === "queue") {
         if (!player || (!player.current && (!player.queue || player.queue.length === 0))) {
-            return interaction.reply({ content: `❌ No music playing. Start with ${getCmd("play")} or ChatPlay!`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: `❌ No music playing. Start with ${getCmd("play")}.`, flags: MessageFlags.Ephemeral });
         }
         if (!canControlMusic(interaction.member, player)) {
             return interaction.reply({ content: VOICE_CHANNEL_DENIAL, flags: MessageFlags.Ephemeral });
@@ -342,7 +322,7 @@ async function handleButtonInteraction(client, interaction) {
     // Queue pagination buttons
     if (customId.startsWith("queue_") && customId !== "queue") {
         if (!player || !player.current) {
-            return interaction.reply({ content: `❌ No music playing. Start with ${getCmd("play")} or ChatPlay!`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: `❌ No music playing. Start with ${getCmd("play")}.`, flags: MessageFlags.Ephemeral });
         }
         if (!canControlMusic(interaction.member, player)) {
             return interaction.reply({ content: VOICE_CHANNEL_DENIAL, flags: MessageFlags.Ephemeral });
@@ -393,7 +373,7 @@ async function handleButtonInteraction(client, interaction) {
     // Most buttons need an active player — send ephemeral if not
     const needsPlayer = ["pause_resume", "skip", "previous", "stop", "shuffle", "loop", "autoplay", "vol_up", "vol_down"];
     if (needsPlayer.includes(customId) && !player) {
-        return interaction.reply({ content: `❌ No music playing. Start with ${getCmd("play")} or ChatPlay!`, flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: `❌ No music playing. Start with ${getCmd("play")}.`, flags: MessageFlags.Ephemeral });
     }
 
     if (needsPlayer.includes(customId) && !canControlMusic(interaction.member, player)) {
@@ -528,24 +508,6 @@ async function handleButtonInteraction(client, interaction) {
         }
 
         case "stop": {
-            // If ChatPlay and 5+ songs in queue, ask for confirmation first
-            const queueLength = player.queue?.length || 0;
-            const isChatPlay = guildData.chatPlayChannelId && guildData.chatPlayMessageId;
-            if (isChatPlay && queueLength >= 5 && !guildData.stopConfirmPending) {
-                guildData.stopConfirmPending = interaction.user.id;
-                // Clear confirmation after 15 seconds
-                setTimeout(() => {
-                    if (guildData.stopConfirmPending === interaction.user.id) {
-                        guildData.stopConfirmPending = null;
-                    }
-                }, 15000);
-                return interaction.followUp({
-                    content: `⚠️ There are **${queueLength} songs** in the queue. Click stop again within 15 seconds to confirm.`,
-                    flags: MessageFlags.Ephemeral,
-                });
-            }
-            guildData.stopConfirmPending = null;
-
             if (player.currentSessionId) {
                 try {
                     const listenedMs = player.position ||
@@ -566,6 +528,7 @@ async function handleButtonInteraction(client, interaction) {
             player._stoppingPlayer = true;
             try {
                 player.queue.clear();
+                delete player._queueLoopRepeatTracks;
                 player.stop();
                 markIntentionalDisconnect(player);
                 await player.destroy();
@@ -642,26 +605,28 @@ async function editPlayerMessageDirectly(client, player, guildData) {
         if (!player || !player.current) return;
 
         const musicardBuffer = await generateMusicCard(player.current, player, guildData);
-        // Use ChatPlay container if in ChatPlay channel for consistent formatting
-        const container = guildData.chatPlayChannelId && guildData.chatPlayMessageId
-            ? createChatPlayNowPlayingContainer(player.current, player, guildData, musicardBuffer)
-            : createNowPlayingContainer(player.current, player, guildData, musicardBuffer, client);
+        const container = createNowPlayingContainer(
+            player.current,
+            player,
+            guildData,
+            musicardBuffer,
+            client
+        );
 
         const files = [];
         if (musicardBuffer) {
             files.push(new AttachmentBuilder(musicardBuffer, { name: "musicard.png" }));
         }
 
-        const channelId = guildData.chatPlayChannelId || guildData.playerChannelId || player.textChannel;
+        const channelId = guildData.playerChannelId || player.textChannel;
         const channel = client.channels.cache.get(channelId);
         if (!channel) {
-            guildData.chatPlayMessageId = null;
             guildData.playerMessageId = null;
             guildData.playerChannelId = null;
             return;
         }
 
-        const messageId = guildData.chatPlayMessageId || guildData.playerMessageId;
+        const messageId = guildData.playerMessageId;
         if (!messageId) return;
 
         const msg = await channel.messages.fetch(messageId);
@@ -672,7 +637,6 @@ async function editPlayerMessageDirectly(client, player, guildData) {
         });
     } catch (error) {
         // Message was deleted — clear stale IDs so next action sends a fresh one
-        guildData.chatPlayMessageId = null;
         guildData.playerMessageId = null;
         guildData.playerChannelId = null;
         guildData.updateInterval && clearInterval(guildData.updateInterval);

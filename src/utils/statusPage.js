@@ -19,8 +19,7 @@ function getNodeList(client) {
 }
 
 function countConnectedNodes(nodeList) {
-    const node = nodeList.find((n) => n.name === config.node.name);
-    return (node?.connected || node?.isConnected) ? 1 : 0;
+    return nodeList.some((node) => node.connected || node.isConnected) ? 1 : 0;
 }
 
 function getSystemStatus(connectedNodes) {

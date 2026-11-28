@@ -9,8 +9,8 @@ By using euphire, you agree to the collection and use of information in accordan
 ## 1. Information We Collect
 To provide and maintain the Service, euphire collects the following information:
 - **Discord User IDs and Server IDs:** Used to associate settings, queues, and command usage with the correct user or server.
-- **Channel IDs:** Used to send messages, manage the ChatPlay feature, and connect to voice channels.
-- **Message Content:** euphire only reads message content in channels where ChatPlay is enabled to detect song requests. We do not log or store the content of your messages.
+- **Channel IDs:** Used to send command responses and connect to voice channels.
+- **Message Content:** euphire reads message content to detect configured text-command prefixes and parse command arguments. We do not log or store general message content.
 - **Command Usage Data:** We may collect anonymous data on how often certain commands or features are used to improve the bot.
 
 ## 2. How We Use Your Information

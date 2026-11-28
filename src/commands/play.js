@@ -23,6 +23,7 @@ const {
 const config = require("../../config");
 const { getSpotifyPlaylistMetadata } = require("../utils/spotifyPlaylistSearch");
 const { sendPlaybackFailureLog } = require("../services/statusMonitor");
+const { getQueueLoopRepeatCount } = require("../utils/queueLoop");
 
 // mm:ss, zero padded (03:07)
 function fmt(ms) {
@@ -63,7 +64,10 @@ function getPlaylistQueueDetails(player, startIndex, wasIdle) {
     return {
         eta: formatPlaylistDuration(etaUntilIndex(player, positionIndex)),
         upcomingPosition: positionIndex + 1,
-        queuePosition: positionIndex + (player.current ? 2 : 1),
+        queuePosition:
+            positionIndex +
+            (player.current ? 2 : 1) +
+            getQueueLoopRepeatCount(player),
     };
 }
 
@@ -703,7 +707,9 @@ module.exports = {
                     const eta = etaUntilIndex(player, queueLength - 1);
 
                     const upcomingPos = queueLength === 1 ? "Next" : String(queueLength);
-                    const queuePos = String(queueLength + 1); // +1 for the currently playing track
+                    const queuePos = String(
+                        queueLength + 1 + getQueueLoopRepeatCount(player)
+                    );
                     const displayName = getSpotifyTrackDisplayName(track);
 
                     const embed = buildAddedTrackEmbed(client, interaction.user, {

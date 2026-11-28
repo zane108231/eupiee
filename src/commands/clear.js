@@ -30,6 +30,7 @@ module.exports = {
         } else {
             throw new TypeError("The player's queue does not support clearing.");
         }
+        delete player._queueLoopRepeatTracks;
 
         if (isPlaying) {
             player._clearQueueRequested = true;

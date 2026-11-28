@@ -10,6 +10,7 @@ const {
 } = require("discord.js");
 const { searchLrclib, getLyrics, cleanSongTitle, splitLyricsIntoPages } = require("../utils/lrclib");
 const coordinator = require("../utils/mongoCoordinator");
+const { createErrorEmbed } = require("../utils/components");
 const config = require("../../config");
 
 // Store active search selections: searchId -> { songs, userId, createdAt }
@@ -238,13 +239,17 @@ module.exports = {
         } catch (error) {
             console.error("[LRCLIB] Lyrics search failed:", error.message);
             return interaction.editReply({
-                content: "❌ Failed to search for lyrics on LRCLIB. Please try again later.",
+                embeds: [
+                    createErrorEmbed(
+                        "❌ Failed to search for lyrics on LRCLIB. Please try again later."
+                    ),
+                ],
             });
         }
 
         if (!songs || songs.length === 0) {
             return interaction.editReply({
-                content: `❌ No lyrics found for: **${query}**`,
+                embeds: [createErrorEmbed("No results ⛔")],
             });
         }
 

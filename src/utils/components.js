@@ -140,6 +140,12 @@ function createCouldNotPlayEmbed(track) {
         .setDescription(getCouldNotPlayDescription(track));
 }
 
+function createErrorEmbed(description) {
+    return new EmbedBuilder()
+        .setColor(0xed4245)
+        .setDescription(description);
+}
+
 /**
  * Create queue display container with pagination
  */
@@ -262,6 +268,7 @@ module.exports = {
     getSpotifyEmoji,
     createNowPlayingContainer,
     createCouldNotPlayEmbed,
+    createErrorEmbed,
     getCouldNotPlayDescription,
     createQueueContainer,
     formatDuration,

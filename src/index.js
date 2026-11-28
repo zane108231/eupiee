@@ -171,7 +171,8 @@ function createBotInstance(token, botId) {
 
     client.botId = botId;
 
-    client.riffy = new Riffy(client, [config.node], {
+    const primaryNodeName = config.node.name || config.node.host;
+    client.riffy = new Riffy(client, [config.node, config.backupNode], {
         send: (payload) => {
             const guildId = payload?.d?.guild_id;
             if (!guildId) return;
@@ -185,6 +186,40 @@ function createBotInstance(token, botId) {
         restVersion: config.restVersion || "v4",
         bypassChecks: {
             nodeFetchInfo: true,
+        },
+        reconnectTimeout: 5000,
+        reconnectTries: Number.POSITIVE_INFINITY,
+        migrateOnDisconnect: true,
+        migrateOnFailure: true,
+        migrationStrategyFn: (player, availableNodes) => {
+            const readyNodes = availableNodes.filter((node) =>
+                client.riffy.readyNodeNames.has(node.name)
+            );
+            return (
+                readyNodes.find((node) => node.name === primaryNodeName) ||
+                readyNodes.sort((a, b) => a.penalties - b.penalties)[0]
+            );
+        },
+    });
+
+    client.riffy.readyNodeNames = new Set();
+    const getLeastUsedNodes = Object.getOwnPropertyDescriptor(
+        Object.getPrototypeOf(client.riffy),
+        "leastUsedNodes"
+    )?.get;
+    if (!getLeastUsedNodes) {
+        throw new Error("Riffy leastUsedNodes getter is unavailable.");
+    }
+    Object.defineProperty(client.riffy, "leastUsedNodes", {
+        configurable: true,
+        get() {
+            const nodes = getLeastUsedNodes
+                .call(this)
+                .filter((node) => this.readyNodeNames.has(node.name));
+            const primaryNode = this.nodeMap.get(primaryNodeName);
+            return this.readyNodeNames.has(primaryNodeName)
+                ? [primaryNode, ...nodes.filter((node) => node !== primaryNode)]
+                : nodes;
         },
     });
 

@@ -121,7 +121,7 @@ function buildQueuePayload(allTracks, page = 1, sessionId) {
         const { title, author } = getTrackDisplayParts(track);
         const uri = track.info?.uri || "https://open.spotify.com";
 
-        description += `${queueNumber}. \`[${duration}]\` [${title} by ${author}](${uri})\n`;
+        description += `${queueNumber}. \`[${duration}]\` **[${title} by ${author}](${uri})**\n`;
 
         const option = new StringSelectMenuOptionBuilder()
             .setLabel(title.slice(0, 100))
@@ -138,15 +138,8 @@ function buildQueuePayload(allTracks, page = 1, sessionId) {
     description += `\ncancel`;
 
     const embed = new EmbedBuilder()
-        .setColor(config.accentColor || 0x2b2d31)
+        .setColor(0x42454a)
         .setDescription(description);
-
-    selectOptions.push(
-        new StringSelectMenuOptionBuilder()
-            .setLabel("cancel")
-            .setDescription("Cancel selection")
-            .setValue(`${sessionId}:cancel`)
-    );
 
     const selectMenu = new StringSelectMenuBuilder()
         .setCustomId("queue_select")
